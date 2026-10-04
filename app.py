@@ -89,6 +89,7 @@ if page=='🏠 Overview':
     with a: st.markdown('<div class="card"><h4>① Explore</h4><p>Select a historical traffic example without uploading any data.</p></div>',unsafe_allow_html=True)
     with b: st.markdown('<div class="card"><h4>② Understand</h4><p>Compare observed and forecast traffic volumes with uncertainty bounds.</p></div>',unsafe_allow_html=True)
     with c: st.markdown('<div class="card"><h4>③ Evaluate</h4><p>Inspect research accuracy, model comparisons and limitations.</p></div>',unsafe_allow_html=True)
+    st.info('**Start here:** Select **🧭 Guided Demo** in the sidebar. Pick a forecast horizon, choose a historical example, and compare the prediction with what was later observed.')
     st.subheader('What does the prototype demonstrate?')
     x,y=st.columns([1.5,1])
     with x:
@@ -110,8 +111,15 @@ elif page=='🧭 Guided Demo':
     df=read_predictions(h)
     if df.empty: st.warning('No usable saved predictions.');st.stop()
     n=min(len(df),240)
-    i=st.slider('Step 2 · Choose a historical example',0,n-1,min(24,n-1),format_func=lambda x:df.iloc[-n+x]['timestamp'].strftime('%d %b %Y, %H:%M'))
-    r=df.iloc[-n+i]
+    examples=df.tail(n).reset_index(drop=True)
+    i=st.selectbox(
+        'Step 2 · Choose a historical example',
+        options=list(range(n)),
+        index=min(24,n-1),
+        format_func=lambda j: examples.iloc[int(j)]['timestamp'].strftime('%d %b %Y, %H:%M'),
+        help='Select a date and time from the held-out historical test period.',
+    )
+    r=examples.iloc[int(i)]
     st.markdown('<div class="step"><strong>Step 3 · Read the forecast</strong><br>Compare the AI prediction with the value observed later in the historical record.</div>',unsafe_allow_html=True)
     a,b,c=st.columns(3)
     a.metric('AI forecast',f"{r['predicted']:,.0f}",help='Estimated traffic volume in vehicles per hour')
@@ -119,9 +127,19 @@ elif page=='🧭 Guided Demo':
     c.metric('Absolute difference',f"{abs(r['predicted']-r['actual']):,.0f}",help='Absolute forecast error for this example')
     if pd.notna(r['lower']) and pd.notna(r['upper']):
         st.info(f"**Prediction interval:** {r['lower']:,.0f}–{r['upper']:,.0f} vehicles/hour. This is an empirical uncertainty range, not a guarantee.")
-    context=df.iloc[max(0,len(df)-n+i-12):min(len(df),len(df)-n+i+13)].copy()
+    row_idx=len(df)-n+int(i)
+    context=df.iloc[max(0,row_idx-12):min(len(df),row_idx+13)].copy()
     st.line_chart(context.set_index('timestamp')[['actual','predicted']],height=330)
-    st.success('**What this means:** The model anticipated the number of vehicles passing this monitored location. It does not determine whether traffic was congested or recommend a real-world intervention.')
+    difference=float(r['predicted']-r['actual'])
+    if difference>0:
+        interpretation=f'The model forecast about {abs(difference):,.0f} more vehicles/hour than were subsequently observed.'
+    elif difference<0:
+        interpretation=f'The model forecast about {abs(difference):,.0f} fewer vehicles/hour than were subsequently observed.'
+    else:
+        interpretation='The predicted and observed traffic volumes match for this example.'
+    st.success(f'**Plain-language explanation:** {interpretation} Traffic volume is not the same as traffic congestion.')
+    with st.expander('What do the numbers mean?'):
+        st.markdown('**AI forecast:** Estimated vehicles passing the sensor in the target hour.\n\n**Observed later:** Recorded vehicle count for that hour.\n\n**Absolute difference:** The gap between the prediction and the observed count.\n\n**Prediction interval:** A range derived from historical model errors; it is not guaranteed to contain every future observation.')
     st.caption('All examples come from previously saved held-out research results. Selecting an example does not retrain the model.')
 
 elif page=='📈 Forecast Explorer':
@@ -141,6 +159,7 @@ elif page=='📈 Forecast Explorer':
     b.metric('MAE · selected window',f"{(view.actual-view.predicted).abs().mean():,.1f}",help='Average absolute prediction error, in vehicles/hour')
     c.metric('Forecast horizon',horizon_label(h))
     st.subheader('Observed vs predicted traffic volume')
+    st.caption('Horizontal axis: historical date/time · Vertical axis: vehicles per hour. Closer lines indicate more accurate forecasts.')
     st.line_chart(view.set_index('timestamp')[['actual','predicted']],height=360)
     if view[['lower','upper']].notna().all().all():
         with st.expander('Show uncertainty bounds',expanded=False):
@@ -153,7 +172,7 @@ elif page=='📈 Forecast Explorer':
 
 elif page=='🧠 AI Insights':
     st.title('🧠 AI Insights')
-    st.write('Understand the information that helps the forecasting models learn recurring traffic patterns.')
+    st.write('Discover which input patterns the AI model relies on most. Larger SHAP bars indicate stronger average influence on the model output—not causes of congestion.')
     h=st.selectbox('Explain forecast horizon',H,format_func=horizon_label)
     shap=optional_csv(f'shap_importance_h{h}.csv')
     if shap is not None and len(shap):
@@ -163,8 +182,18 @@ elif page=='🧠 AI Insights':
         if num and txt:
             value_col=next((c for c in num if 'mean' in c.lower() or 'importance' in c.lower()),num[0])
             label_col=next((c for c in txt if 'feature' in c.lower()),txt[0])
-            view=shap[[label_col,value_col]].dropna().sort_values(value_col,ascending=False).head(12)
-            st.bar_chart(view.set_index(label_col)[value_col],horizontal=True)
+            friendly={'origin_value':'Traffic at forecast origin','hour':'Hour of day','dow':'Day of week','month':'Month','is_weekend':'Weekend indicator',
+                      'rolling_mean_3':'Recent 3-hour average','rolling_mean_24':'Recent 24-hour average','rolling_mean_168':'Recent 7-day average'}
+            def friendly_feature(raw):
+                name=str(raw).replace('num__','').replace('cat__','')
+                if name.startswith('lag_'):
+                    return f'Traffic {name.split("_")[-1]} hours earlier'
+                return friendly.get(name,name.replace('_',' ').capitalize())
+            view=shap[[label_col,value_col]].dropna().sort_values(value_col,ascending=False).head(10).copy()
+            view['friendly_name']=view[label_col].map(friendly_feature)
+            st.bar_chart(view.set_index('friendly_name')[value_col],horizontal=True)
+            with st.expander('Show original SHAP feature names'):
+                st.dataframe(view[[label_col,'friendly_name',value_col]],hide_index=True,use_container_width=True)
             st.caption('Global SHAP importance summarizes average model sensitivity; it is not a causal explanation or a local explanation for a selected example.')
         else: st.dataframe(shap,use_container_width=True)
     else:
@@ -176,8 +205,10 @@ elif page=='🧠 AI Insights':
 
 elif page=='📊 Research Evidence':
     st.title('📊 Research Evidence')
-    st.write('Transparent results from the saved historical evaluation—not claims of live operational performance.')
+    st.write('How well did the models predict historical traffic? Lower forecasting error is better. These are held-out research results, not live performance.')
     comp=optional_csv('model_comparison.csv')
+    if comp is not None:
+        comp=comp.rename(columns={c:c.strip().lower() for c in comp.columns})
     if comp is not None and {'model','mae'}.issubset(comp.columns):
         hcol='horizon_steps' if 'horizon_steps' in comp.columns else ('horizon' if 'horizon' in comp.columns else None)
         if hcol:
@@ -186,16 +217,21 @@ elif page=='📊 Research Evidence':
             part=comp[comp[hcol]==selected].copy()
         else: part=comp.copy()
         part=part.sort_values('mae')
+        best=part.iloc[0]
+        st.metric('Lowest MAE on this horizon',f"{best['mae']:,.1f} vehicles/hour",help=f"Model: {best['model']}")
+        st.caption('MAE means the average size of the forecast error. For example, MAE = 150 means forecasts differed from the recorded hourly volume by about 150 vehicles on average.')
         st.subheader('Mean absolute error (lower is better)')
         st.bar_chart(part.set_index('model')['mae'],horizontal=True,height=290)
         display=[c for c in ['model','mae','rmse','r2','coverage_90','mean_interval_width','n_test'] if c in part]
         st.dataframe(part[display].round(3),hide_index=True,use_container_width=True)
         st.caption('MAE and RMSE are in vehicles/hour. R² describes explained variation on the evaluated sample. Results vary by study version.')
-    else: st.info('For full model comparisons, add model_comparison.csv from the same frozen experiment as the deployed predictions.')
+    else: st.warning('Model comparison is unavailable. Check that model_comparison.csv is committed and contains model and MAE columns.')
     for filename,title in [('rolling_origin.csv','Rolling-origin validation'),('paired_bootstrap.csv','Paired statistical comparisons'),('conformal.csv','Prediction-interval calibration'),('missing_history_sensitivity.csv','Missing-history sensitivity'),('monthly_coverage.csv','Monthly interval coverage'),('subgroups.csv','Subgroup evaluation')]:
         data=optional_csv(filename)
         if data is not None:
-            with st.expander(title):st.dataframe(data,use_container_width=True,hide_index=True)
+            with st.expander(title):
+                st.dataframe(data,use_container_width=True,hide_index=True)
+                st.download_button(f'Download {title.lower()} CSV',data.to_csv(index=False).encode('utf-8'),filename,'text/csv',key=f'download_{filename}')
     st.info('**Scientific interpretation:** High accuracy on a single-site historical traffic-volume dataset does not establish accurate congestion prediction, transferability to other cities, or effectiveness of interventions.')
 
 else:
@@ -203,7 +239,10 @@ else:
     st.subheader('Research demonstration')
     st.write('UrbanFlow Sentinel AI is an explainable traffic-demand forecasting research prototype. It illustrates how historical traffic-volume observations can support short-term prediction and uncertainty-aware decision support.')
     st.subheader('How it works')
-    st.markdown('**Historical traffic data → quality checks and temporal features → trained forecasting model → held-out predictions → visual explanation and evaluation.**')
+    a,b,c,d=st.columns(4)
+    for col,emoji,title,detail in [(a,'📥','Historical data','Hourly traffic observations'),(b,'🧹','Quality checks','Missingness and temporal features'),(c,'🤖','AI forecast','Models estimate future volume'),(d,'📊','Interpret','Forecast, uncertainty and validation')]:
+        with col:
+            st.markdown(f'<div class="card"><h4>{emoji} {title}</h4><p>{detail}</p></div>',unsafe_allow_html=True)
     st.subheader('What is available now')
     st.success('Historical forecasts, evaluation charts, guided demonstration, and downloadable historical records.')
     st.subheader('Future development — not yet validated')
