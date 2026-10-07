@@ -51,11 +51,9 @@ def firstcity_research_branding():
             <img src="data:image/png;base64,{logo_b64}" alt="First City">
           </a>
           <div>
-            <div class="label">Developed by</div>
             <a href="https://firstcity.sa/ar/research" target="_blank" rel="noopener noreferrer">
               <div class="name">Research, Development &amp; Innovation Center<br>مركز البحث والتطوير والابتكار</div>
             </a>
-            <div class="org">First City for Information Technology</div>
           </div>
         </div>
         """,
