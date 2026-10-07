@@ -4,6 +4,7 @@ Compatible with historical_predictions_h*.csv and predictions_h*.csv exports.
 """
 from __future__ import annotations
 import json
+import base64
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -20,6 +21,13 @@ st.markdown('''<style>
 .card h4{margin:0 0 .35rem;color:#17415c}.card p{margin:0;color:#3f5767}
 .step{padding:.8rem 1rem;border-left:4px solid #139c9d;background:#eff9f8;border-radius:8px;margin:.6rem 0}
 [data-testid="stMetric"]{border:1px solid #e2eaf0;border-radius:12px;padding:1rem;background:#f8fafc}
+.fc-brand{display:flex;align-items:center;gap:16px;padding:12px 16px;margin:0 0 1rem 0;border:1px solid #dfeaf0;border-radius:14px;background:#f8fbfd}
+.fc-brand img{width:155px;max-width:100%;height:auto;display:block}
+.fc-brand .label{font-size:.78rem;color:#607787;margin-bottom:2px}
+.fc-brand .name{font-size:1.02rem;font-weight:750;color:#17415c;line-height:1.45}
+.fc-brand .org{font-size:.82rem;color:#607787;margin-top:3px}
+.fc-brand a{text-decoration:none}
+@media(max-width:700px){.fc-brand{align-items:flex-start}.fc-brand img{width:120px}.fc-brand .name{font-size:.92rem}}
 footer{visibility:hidden}
 </style>''', unsafe_allow_html=True)
 
@@ -29,6 +37,30 @@ def read_metadata():
     return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
 
 meta=read_metadata()
+
+def firstcity_research_branding():
+    """Clickable First City RDI Center branding shown across the app."""
+    logo_path = BASE / 'firstcity_logo.png'
+    if not logo_path.exists():
+        return
+    logo_b64 = base64.b64encode(logo_path.read_bytes()).decode('ascii')
+    st.markdown(
+        f"""
+        <div class="fc-brand">
+          <a href="https://firstcity.sa/ar/research" target="_blank" rel="noopener noreferrer">
+            <img src="data:image/png;base64,{logo_b64}" alt="First City">
+          </a>
+          <div>
+            <div class="label">Developed by</div>
+            <a href="https://firstcity.sa/ar/research" target="_blank" rel="noopener noreferrer">
+              <div class="name">Research, Development &amp; Innovation Center<br>مركز البحث والتطوير والابتكار</div>
+            </a>
+            <div class="org">First City for Information Technology</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 def available_horizons():
     found=set()
@@ -128,6 +160,8 @@ st.sidebar.divider()
 st.sidebar.caption('DATA STATUS')
 st.sidebar.info('Historical research dataset · Not live traffic')
 st.sidebar.caption('The UCI study uses one monitoring location and measures traffic volume, not observed congestion.')
+
+firstcity_research_branding()
 
 if page=='🏠 Overview':
     st.markdown('''<div class="hero"><div class="eyebrow">Smart mobility • Explainable AI</div><h1>See tomorrow’s traffic patterns, sooner.</h1><p>Explore how artificial intelligence can forecast traffic demand hours ahead, explain predictions, and support future proactive planning.</p></div>''',unsafe_allow_html=True)
@@ -335,6 +369,7 @@ else:
     st.write(f"**Dataset:** {meta.get('source','Historical research traffic-volume dataset')}")
     st.write(f"**Outcome:** {meta.get('outcome_interpretation','Traffic volume, not measured congestion')}")
     st.write('**Research limitations:** single-site data where applicable; empirical uncertainty intervals may vary across time; no causal intervention validation.')
+    st.markdown('**Developed by:** [Research, Development & Innovation Center | مركز البحث والتطوير والابتكار](https://firstcity.sa/ar/research) · First City for Information Technology')
     with st.expander('Technical provenance'):
         st.json(meta)
 
