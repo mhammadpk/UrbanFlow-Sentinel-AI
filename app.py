@@ -13,7 +13,7 @@ import streamlit as st
 BASE = Path(__file__).resolve().parent
 st.set_page_config(page_title='UrbanFlow Sentinel AI | Smart Mobility', page_icon='🚦', layout='wide', initial_sidebar_state='expanded')
 st.markdown('''<style>
-.block-container{padding-top:1.5rem;max-width:1440px}h1,h2,h3{letter-spacing:-.025em}
+.block-container{padding-top:3rem;max-width:1440px}h1,h2,h3{letter-spacing:-.025em}
 .hero{padding:1.9rem 2rem;border-radius:18px;background:linear-gradient(115deg,#102b48,#0e6475);color:white;margin-bottom:1rem}
 .hero h1{color:white;font-size:2.3rem;margin:0}.hero p{color:#e3f5f7;font-size:1.04rem;margin:.5rem 0}
 .eyebrow{font-size:.78rem;font-weight:750;letter-spacing:.12em;color:#83e7d6;text-transform:uppercase}
