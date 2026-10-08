@@ -141,8 +141,10 @@ def safe_feature_name(raw):
     labels={'origin_value':'Traffic at forecast origin','hour':'Hour of day','dow':'Day of week',
             'month':'Month of year','is_weekend':'Weekend','rolling_mean_3':'Recent 3-hour average',
             'rolling_mean_24':'Recent 24-hour average','rolling_mean_168':'Recent 7-day average'}
-    if name.startswith('lag_'):
-        return f'Traffic {name.split("_")[-1]} hours earlier'
+    if name.startswith("lag_"):
+        hours = int(name.split("_")[-1])
+        unit = "hour" if hours == 1 else "hours"
+        return f"Traffic {hours} {unit} earlier"
     return labels.get(name,name.replace('_',' ').capitalize())
 
 
@@ -262,6 +264,41 @@ elif page=='📈 Forecast Explorer':
         st.download_button('Download selected records',view.to_csv(index=False).encode(),f'urbanflow_forecasts_{h}h.csv','text/csv')
     st.caption('Traffic volume is a demand measure. This chart does not represent measured speed, delays, or congestion hotspots.')
 
+    with st.expander("What does each input signal mean?", expanded=True):
+
+    explanations = {
+        "Traffic at forecast origin":
+            "The latest traffic volume available when the forecast is made.",
+
+        "Hour of day":
+            "The time-of-day input used by the model, helping it learn daily patterns.",
+
+        "Traffic 1 hours earlier":
+            "Traffic volume recorded one hour before the forecast origin.",
+
+        "Traffic 2 hours earlier":
+            "Traffic volume recorded two hours before the forecast origin.",
+
+        "Traffic 3 hours earlier":
+            "Traffic volume recorded three hours before the forecast origin.",
+
+        "Traffic 6 hours earlier":
+            "Traffic volume recorded six hours before the forecast origin.",
+
+        "Recent 3-hour average":
+            "Average traffic volume over a recent three-hour window.",
+
+        "Recent 24-hour average":
+            "Average traffic volume over a recent 24-hour window."
+    }
+
+    for signal in view["friendly_name"]:
+        meaning = explanations.get(
+            signal,
+            "A historical or temporal feature used by the forecasting model."
+        )
+        st.markdown(f"**{signal}** — {meaning}")
+
 elif page=='🧠 AI Insights':
     st.title('🧠 AI Insights')
     st.write('Discover which input patterns the AI model relies on most. Larger SHAP bars indicate stronger average influence on the model output—not causes of congestion.')
@@ -274,8 +311,55 @@ elif page=='🧠 AI Insights':
             view=shap.dropna(subset=['feature','mean_abs_shap']).sort_values('mean_abs_shap',ascending=False).head(8).copy()
             view['friendly_name']=view['feature'].map(safe_feature_name)
             if not view.empty:
-                st.subheader('Which signals matter most?')
-                st.bar_chart(view.set_index('friendly_name')['mean_abs_shap'].sort_values(),horizontal=True,height=320)
+                st.subheader("What information influences the AI forecast?")
+
+                st.caption(
+                    "The chart ranks the input signals used by the AI model. "
+                    "Longer bars indicate greater average influence on predictions. "
+                    "These are SHAP importance values, not percentages."
+                )
+
+                import altair as alt
+
+                chart_data = view[
+                    ["friendly_name", "mean_abs_shap"]
+                ].copy()
+
+                chart = (
+                    alt.Chart(chart_data)
+                    .mark_bar(color="#1673D1", cornerRadiusEnd=4)
+                    .encode(
+                        x=alt.X(
+                            "mean_abs_shap:Q",
+                            title="Average absolute SHAP contribution"
+                        ),
+                        y=alt.Y(
+                            "friendly_name:N",
+                            sort="-x",
+                            title=None,
+                            axis=alt.Axis(labelLimit=260)
+                        ),
+                        tooltip=[
+                            alt.Tooltip("friendly_name:N", title="Input signal"),
+                            alt.Tooltip(
+                                "mean_abs_shap:Q",
+                                title="Mean absolute SHAP",
+                                format=",.2f"
+                            )
+                        ]
+                    )
+                    .properties(height=350)
+                )
+
+                st.altair_chart(chart, use_container_width=True)
+
+                st.info(
+                    "**How to read this chart:** "
+                    "The model uses several historical traffic and time-related signals. "
+                    "A longer bar means that a signal had greater average influence "
+                    "on the model's predictions in the saved SHAP sample. "
+                    "It does not mean that the signal causes congestion."
+                )
                 top=view.iloc[0]
                 st.info(f"**In simple terms:** {top['friendly_name']} was the strongest average influence on the {horizon_label(h)} model in the saved SHAP sample. This explains model sensitivity, not the cause of traffic congestion.")
                 with st.expander('Technical SHAP data and original feature names'):
