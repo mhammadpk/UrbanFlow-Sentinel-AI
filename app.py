@@ -264,41 +264,6 @@ elif page=='📈 Forecast Explorer':
         st.download_button('Download selected records',view.to_csv(index=False).encode(),f'urbanflow_forecasts_{h}h.csv','text/csv')
     st.caption('Traffic volume is a demand measure. This chart does not represent measured speed, delays, or congestion hotspots.')
 
-    with st.expander("What does each input signal mean?", expanded=True):
-
-    explanations = {
-        "Traffic at forecast origin":
-            "The latest traffic volume available when the forecast is made.",
-
-        "Hour of day":
-            "The time-of-day input used by the model, helping it learn daily patterns.",
-
-        "Traffic 1 hours earlier":
-            "Traffic volume recorded one hour before the forecast origin.",
-
-        "Traffic 2 hours earlier":
-            "Traffic volume recorded two hours before the forecast origin.",
-
-        "Traffic 3 hours earlier":
-            "Traffic volume recorded three hours before the forecast origin.",
-
-        "Traffic 6 hours earlier":
-            "Traffic volume recorded six hours before the forecast origin.",
-
-        "Recent 3-hour average":
-            "Average traffic volume over a recent three-hour window.",
-
-        "Recent 24-hour average":
-            "Average traffic volume over a recent 24-hour window."
-    }
-
-    for signal in view["friendly_name"]:
-        meaning = explanations.get(
-            signal,
-            "A historical or temporal feature used by the forecasting model."
-        )
-        st.markdown(f"**{signal}** — {meaning}")
-
 elif page=='🧠 AI Insights':
     st.title('🧠 AI Insights')
     st.write('Discover which input patterns the AI model relies on most. Larger SHAP bars indicate stronger average influence on the model output—not causes of congestion.')
@@ -364,6 +329,23 @@ elif page=='🧠 AI Insights':
                 st.info(f"**In simple terms:** {top['friendly_name']} was the strongest average influence on the {horizon_label(h)} model in the saved SHAP sample. This explains model sensitivity, not the cause of traffic congestion.")
                 with st.expander('Technical SHAP data and original feature names'):
                     st.dataframe(view[['feature','friendly_name','mean_abs_shap']],hide_index=True,use_container_width=True)
+                with st.expander("What does each input signal mean?", expanded=True):
+                    explanations = {
+                        "Traffic at forecast origin": "The latest traffic-volume measurement available when the forecast is made.",
+                        "Hour of day": "The hour used as a model input, helping identify recurring daily patterns.",
+                        "Day of week": "The day-of-week input, helping identify weekly traffic patterns.",
+                        "Traffic 1 hour earlier": "Traffic volume recorded one hour before the forecast origin.",
+                        "Traffic 2 hours earlier": "Traffic volume recorded two hours before the forecast origin.",
+                        "Traffic 3 hours earlier": "Traffic volume recorded three hours before the forecast origin.",
+                        "Traffic 6 hours earlier": "Traffic volume recorded six hours before the forecast origin.",
+                        "Recent 3-hour average": "Mean traffic volume over a recent three-hour window.",
+                        "Recent 24-hour average": "Mean traffic volume over a recent 24-hour window.",
+                        "Recent 7-day average": "Mean traffic volume over a recent seven-day window.",
+                    }
+                    for signal in view["friendly_name"].drop_duplicates():
+                        meaning = explanations.get(signal, "A historical or temporal input used by the forecasting model.")
+                        st.markdown(f"**{signal}** — {meaning}")
+                    st.caption("Rolling-window definitions depend on the saved feature-engineering configuration.")
             else:st.warning('The selected SHAP CSV has no valid importance values.')
         else:
             st.warning(f'The h{h} SHAP file is present but lacks feature and mean_abs_shap columns.')
