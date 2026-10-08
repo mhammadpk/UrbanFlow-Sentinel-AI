@@ -318,15 +318,36 @@ elif page=='🧠 AI Insights':
 
                 st.altair_chart(chart, use_container_width=True)
 
+                st.markdown("#### How should you compare these signals?")
                 st.info(
-                    "**How to read this chart:** "
-                    "The model uses several historical traffic and time-related signals. "
-                    "A longer bar means that a signal had greater average influence "
-                    "on the model's predictions in the saved SHAP sample. "
-                    "It does not mean that the signal causes congestion."
+                    "**Each bar represents the average influence of an input signal "
+                    "on the model's predictions.** Longer bars indicate greater "
+                    "average influence in the saved SHAP sample. The comparison "
+                    "helps identify which information the model relies on most."
                 )
-                top=view.iloc[0]
-                st.info(f"**In simple terms:** {top['friendly_name']} was the strongest average influence on the {horizon_label(h)} model in the saved SHAP sample. This explains model sensitivity, not the cause of traffic congestion.")
+
+                top_two = view.nlargest(2, "mean_abs_shap")
+                if len(top_two) >= 2:
+                    first = top_two.iloc[0]["friendly_name"]
+                    second = top_two.iloc[1]["friendly_name"]
+                    st.markdown(
+                        f"**What the results show for {horizon_label(h)}:** "
+                        f"**{first}** has the greatest average influence, "
+                        f"followed by **{second}**. Other signals have smaller "
+                        "individual contributions but may still provide useful "
+                        "historical context."
+                    )
+                elif len(top_two) == 1:
+                    st.markdown(
+                        f"**Most influential signal for {horizon_label(h)}:** "
+                        f"**{top_two.iloc[0]['friendly_name']}**."
+                    )
+
+                st.caption(
+                    "SHAP importance values are not percentages, accuracy scores, "
+                    "or measurements of congestion. Correlated inputs can share "
+                    "predictive information, and SHAP does not establish causality."
+                )
                 with st.expander('Technical SHAP data and original feature names'):
                     st.dataframe(view[['feature','friendly_name','mean_abs_shap']],hide_index=True,use_container_width=True)
                 with st.expander("What does each input signal mean?", expanded=True):
