@@ -174,14 +174,31 @@ if page=='🏠 Overview':
     st.subheader('Research results at a glance')
     comparison=normalized_comparison()
     if comparison is not None:
-        first=metric_row(1,'rf')
-        imp=percent_improvement(1)
+        demo_h = 1 if 1 in H else H[0]
+        demo_model = metric_row(demo_h, 'lgbm')
+        research_best = comparison[comparison.horizon_steps == demo_h].sort_values('mae')
+        research_best = research_best.iloc[0] if not research_best.empty else None
         k1,k2,k3,k4=st.columns(4)
-        k1.metric('Forecast horizons',f'{len(H)}',help='Separate 1-, 3- and 6-hour prediction tasks.')
-        k2.metric('Best 1-hour test MAE',f'{float(first.mae):,.1f}' if first is not None else 'N/A',help='Random Forest average absolute error, vehicles/hour, on the held-out test set.')
-        k3.metric('Error reduction vs historical profile',f'{imp:.1f}%' if imp is not None else 'N/A',help='Relative reduction in test MAE for Random Forest at 1 hour; not a reduction in congestion.')
-        k4.metric('Monitoring locations','1' if meta.get('data_mode','uci')=='uci' else 'Dataset-defined',help='UCI research data use one traffic-count monitoring location.')
-        st.caption('Metrics are read from model_comparison.csv in your repository. The live demo uses saved LightGBM forecasts; Random Forest achieved the lowest MAE in the recorded comparisons.')
+        k1.metric('Demo forecasting model', 'LightGBM',
+                  help='Saved LightGBM predictions power the interactive demonstration.')
+        k2.metric(f'LightGBM test MAE · {horizon_label(demo_h)}',
+                  f'{float(demo_model.mae):,.1f} vehicles/hour' if demo_model is not None else 'N/A',
+                  help='Average absolute prediction error on the held-out historical test set; lower is better.')
+        k3.metric('Forecast horizons', f'{len(H)}',
+                  help='Available saved forecast horizons.')
+        k4.metric('Monitoring locations',
+                  '1' if meta.get('data_mode','uci')=='uci' else 'Dataset-defined',
+                  help='The UCI research data use one traffic-count monitoring location.')
+        if research_best is not None and str(research_best['model']).lower() != 'lgbm':
+            st.caption(
+                f'**Demo versus research comparison:** LightGBM powers the saved forecasts. '
+                f'{model_name(research_best["model"])} achieved the lowest overall test error '
+                f'for {horizon_label(demo_h)} '
+                f'({float(research_best["mae"]):,.1f} vehicles/hour). '
+                'See Research Evidence for the full comparison.'
+            )
+        else:
+            st.caption('Demo forecasts use LightGBM. Research Evidence contains the full held-out model comparison.')
     else:
         st.warning('Research metrics are not available. Confirm model_comparison.csv is beside app.py or inside research/.')
     st.subheader('What does the prototype demonstrate?')
@@ -431,18 +448,35 @@ elif page=='📊 Research Evidence':
             rf = metric_row(selected, 'rf')
             lgbm = metric_row(selected, 'lgbm')
             profile = metric_row(selected, 'historical_profile')
-            gain = percent_improvement(selected)
-
             st.subheader('Research performance at a glance')
             c1, c2, c3 = st.columns(3)
-            c1.metric('Lowest-error method', model_name(best['model']),
-                      help='Method with the smallest mean absolute error (MAE) for this forecast horizon.')
-            c2.metric('Lowest average error', f"{float(best['mae']):,.1f} vehicles/hour",
-                      help='Mean absolute error (MAE): average size of the prediction error. Lower is better.')
-            c3.metric('Random Forest error reduction vs historical profile',
-                      f'{gain:.1f}%' if gain is not None else 'Not available',
-                      help='Percentage reduction in MAE relative to the historical-profile baseline; not a reduction in traffic or congestion.')
-            st.caption('These results describe forecasting errors on a historical test dataset, not improvements in road conditions.')
+            c1.metric('AI model used in this demo', 'LightGBM',
+                      help='The saved predictions and uncertainty displays in the interactive demo use LightGBM.')
+            c2.metric('LightGBM average forecast error',
+                      f'{float(lgbm.mae):,.1f} vehicles/hour' if lgbm is not None else 'Not available',
+                      help='Mean absolute error (MAE) for the selected horizon on the held-out historical test set. Lower is better.')
+            if lgbm is not None and profile is not None and float(profile.mae) > 0:
+                lgbm_gain = 100 * (float(profile.mae) - float(lgbm.mae)) / float(profile.mae)
+                gain_text = f'{lgbm_gain:.1f}%'
+            else:
+                gain_text = 'Not available'
+            c3.metric('LightGBM error reduction vs historical profile', gain_text,
+                      help='Relative reduction in historical prediction MAE versus the simple baseline, not reduced congestion.')
+            if lgbm is not None and rf is not None:
+                if float(rf.mae) < float(lgbm.mae):
+                    st.info(
+                        f'**Why is LightGBM highlighted?** It powers the interactive demonstration '
+                        f'and has saved chronological validation results. Random Forest achieved '
+                        f'a lower overall test error for {horizon_label(selected)} '
+                        f'(**{float(rf.mae):,.1f}** versus **{float(lgbm.mae):,.1f}** vehicles/hour). '
+                        'The full comparison is shown below; these are different evaluation purposes.'
+                    )
+                else:
+                    st.info('**Why is LightGBM highlighted?** It powers the saved interactive forecasts. '
+                            'The complete held-out comparison, including Random Forest, is shown below.')
+            else:
+                st.caption('LightGBM powers the saved interactive forecasts. The full research comparison is shown below.')
+            st.caption('All metrics describe historical forecasting errors, not measured improvements in road conditions.')
 
             st.subheader('Which forecasting method predicts traffic most accurately?')
             st.write('**Lower bars are better:** each bar shows average prediction error in vehicles per hour (MAE).')
@@ -506,7 +540,7 @@ elif page=='📊 Research Evidence':
                             st.write(f'**In simple terms:** About **{coverage:.0f} out of every 100** historical observations fell within the predicted uncertainty ranges. The target was 90 out of 100.')
                             st.caption('Coverage is not forecast accuracy. Intervals can miss observations and coverage may differ across time periods; future coverage is not guaranteed.')
 
-            st.subheader('How does forecast accuracy change across time periods?')
+            st.subheader('How does LightGBM forecast accuracy change across time periods?')
             rolling = optional_csv('rolling_origin.csv')
             if rolling is not None:
                 rolling = rolling.rename(columns={c: c.strip().lower() for c in rolling.columns})
@@ -656,6 +690,7 @@ else:
     for col,emoji,title,detail in [(a,'📥','Historical data','Hourly traffic observations'),(b,'🧹','Quality checks','Missingness and temporal features'),(c,'🤖','AI forecast','Models estimate future volume'),(d,'📊','Interpret','Forecast, uncertainty and validation')]:
         with col:
             st.markdown(f'<div class="card"><h4>{emoji} {title}</h4><p>{detail}</p></div>',unsafe_allow_html=True)
+    st.info('**Model distinction:** LightGBM supplies the saved interactive forecasts and chronological validation results. Random Forest achieved the lowest held-out MAE in the recorded model comparison; both are reported transparently in Research Evidence.')
     st.subheader('What is available now')
     st.success('Historical forecasts, evaluation charts, guided demonstration, and downloadable historical records.')
     st.subheader('Future development — not yet validated')
