@@ -138,7 +138,7 @@ def percent_improvement(h):
 
 def safe_feature_name(raw):
     name=str(raw).replace('num__','').replace('cat__','')
-    labels={'origin_value':'Traffic at forecast origin','hour':'Hour of day','dow':'Day of week',
+    labels={'origin_value':'Latest observed traffic volume','hour':'Hour of day','dow':'Day of week',
             'month':'Month of year','is_weekend':'Weekend','rolling_mean_3':'Recent 3-hour average',
             'rolling_mean_24':'Recent 24-hour average','rolling_mean_168':'Recent 7-day average'}
     if name.startswith("lag_"):
@@ -318,55 +318,94 @@ elif page=='🧠 AI Insights':
 
                 st.altair_chart(chart, use_container_width=True)
 
-                st.markdown("#### How should you compare these signals?")
+                st.markdown("#### What does the SHAP value mean?")
                 st.info(
-                    "**Each bar represents the average influence of an input signal "
-                    "on the model's predictions.** Longer bars indicate greater "
-                    "average influence in the saved SHAP sample. The comparison "
-                    "helps identify which information the model relies on most."
+                    "**Mean absolute SHAP value** is the average size of a signal's "
+                    "contribution to the model's predictions relative to a reference "
+                    "prediction, regardless of whether it pushes a prediction up or down. "
+                    "Longer bars mean greater average influence across the evaluated samples."
+                )
+                st.caption(
+                    "The values are not percentages, forecasting errors, or traffic congestion "
+                    "measurements. They do not show whether a signal raises or lowers an "
+                    "individual prediction. Correlated signals can share predictive information."
                 )
 
+                st.markdown("#### Which signals influence the model most?")
                 top_two = view.nlargest(2, "mean_abs_shap")
                 if len(top_two) >= 2:
-                    first = top_two.iloc[0]["friendly_name"]
-                    second = top_two.iloc[1]["friendly_name"]
-                    st.markdown(
-                        f"**What the results show for {horizon_label(h)}:** "
-                        f"**{first}** has the greatest average influence, "
-                        f"followed by **{second}**. Other signals have smaller "
-                        "individual contributions but may still provide useful "
-                        "historical context."
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Strongest signal", top_two.iloc[0]["friendly_name"])
+                    with col2:
+                        st.metric("Second strongest signal", top_two.iloc[1]["friendly_name"])
+                    st.write(
+                        f"For **{horizon_label(h)}**, **{top_two.iloc[0]['friendly_name']}** "
+                        f"has the largest average influence, followed by "
+                        f"**{top_two.iloc[1]['friendly_name']}**. Other signals have "
+                        "smaller individual contributions but may still be useful together."
                     )
-                elif len(top_two) == 1:
-                    st.markdown(
-                        f"**Most influential signal for {horizon_label(h)}:** "
+                else:
+                    st.write(
+                        f"The most influential signal for {horizon_label(h)} is "
                         f"**{top_two.iloc[0]['friendly_name']}**."
                     )
 
-                st.caption(
-                    "SHAP importance values are not percentages, accuracy scores, "
-                    "or measurements of congestion. Correlated inputs can share "
-                    "predictive information, and SHAP does not establish causality."
-                )
-                with st.expander('Technical SHAP data and original feature names'):
-                    st.dataframe(view[['feature','friendly_name','mean_abs_shap']],hide_index=True,use_container_width=True)
                 with st.expander("What does each input signal mean?", expanded=True):
                     explanations = {
-                        "Traffic at forecast origin": "The latest traffic-volume measurement available when the forecast is made.",
-                        "Hour of day": "The hour used as a model input, helping identify recurring daily patterns.",
-                        "Day of week": "The day-of-week input, helping identify weekly traffic patterns.",
-                        "Traffic 1 hour earlier": "Traffic volume recorded one hour before the forecast origin.",
-                        "Traffic 2 hours earlier": "Traffic volume recorded two hours before the forecast origin.",
-                        "Traffic 3 hours earlier": "Traffic volume recorded three hours before the forecast origin.",
-                        "Traffic 6 hours earlier": "Traffic volume recorded six hours before the forecast origin.",
-                        "Recent 3-hour average": "Mean traffic volume over a recent three-hour window.",
-                        "Recent 24-hour average": "Mean traffic volume over a recent 24-hour window.",
-                        "Recent 7-day average": "Mean traffic volume over a recent seven-day window.",
+                        "Latest observed traffic volume":
+                            "The most recent traffic-volume measurement available at the forecast starting time (forecast origin).",
+                        "Hour of day":
+                            "The hour-of-day input used to recognize recurring daily traffic patterns.",
+                        "Day of week":
+                            "The day-of-week input used to recognize recurring weekly patterns.",
+                        "Month of year":
+                            "The calendar month, which may capture seasonal patterns.",
+                        "Weekend":
+                            "Indicates whether the time falls on a weekend.",
+                        "Recent 3-hour average":
+                            "Average traffic volume across a recent three-hour window.",
+                        "Recent 24-hour average":
+                            "Average traffic volume across a recent 24-hour window.",
+                        "Recent 7-day average":
+                            "Average traffic volume across a recent seven-day window."
                     }
-                    for signal in view["friendly_name"].drop_duplicates():
-                        meaning = explanations.get(signal, "A historical or temporal input used by the forecasting model.")
+                    for _, feature_row in view.iterrows():
+                        signal = feature_row["friendly_name"]
+                        original = str(feature_row["feature"]).replace("num__", "").replace("cat__", "")
+                        if original.startswith("lag_"):
+                            try:
+                                hours = int(original.split("_")[-1])
+                                meaning = f"Traffic volume recorded {hours} hour(s) before the forecast starting time."
+                            except ValueError:
+                                meaning = "A historical traffic measurement used by the model."
+                        else:
+                            meaning = explanations.get(
+                                signal, "A historical or time-related input used by the forecasting model."
+                            )
                         st.markdown(f"**{signal}** — {meaning}")
-                    st.caption("Rolling-window definitions depend on the saved feature-engineering configuration.")
+                    st.caption(
+                        "Forecast origin means the time from which a prediction is made. "
+                        "For example, a 1-hour-ahead forecast made at 8 AM predicts traffic "
+                        "for 9 AM. Exact rolling-window alignment follows the research feature-engineering setup."
+                    )
+
+                with st.expander(
+                    "🔬 Advanced details: View AI feature importance data", expanded=False
+                ):
+                    technical_data = view[
+                        ["friendly_name", "feature", "mean_abs_shap"]
+                    ].copy()
+                    technical_data.columns = [
+                        "Input signal", "Original feature name", "Mean absolute SHAP value"
+                    ]
+                    st.dataframe(
+                        technical_data.round(2), hide_index=True, use_container_width=True
+                    )
+                    st.caption(
+                        "Original feature names and saved global SHAP importance scores "
+                        "are provided for research transparency."
+                    )
             else:st.warning('The selected SHAP CSV has no valid importance values.')
         else:
             st.warning(f'The h{h} SHAP file is present but lacks feature and mean_abs_shap columns.')
@@ -374,10 +413,6 @@ elif page=='🧠 AI Insights':
         st.warning(f'SHAP results for {horizon_label(h)} could not be loaded. Verify research/shap_importance_h{h}.csv exists on the GitHub main branch.')
         with st.expander('Troubleshooting: expected paths'):
             st.code('\n'.join(str(p.relative_to(BASE)) for p in [BASE/f'shap_importance_h{h}.csv',BASE/'metrics'/f'shap_importance_h{h}.csv',BASE/'research'/f'shap_importance_h{h}.csv']))
-    st.subheader('How to interpret model inputs')
-    for title,desc in [('Recent traffic history','Lagged traffic-volume measurements help the model recognize current demand.'),('Time of day and day of week','Recurring commuting and daily activity patterns help contextualize forecasts.'),('Rolling traffic patterns','Recent averages can smooth noisy observations, but missing history may reduce reliability.')]:
-        st.markdown(f'<div class="card"><h4>{title}</h4><p>{desc}</p></div>',unsafe_allow_html=True)
-    st.warning('Feature importance describes model behavior. It does not prove that changing any factor would reduce congestion.')
 
 elif page=='📊 Research Evidence':
     st.title('📊 Research Evidence')
