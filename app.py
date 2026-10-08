@@ -506,40 +506,81 @@ elif page=='📊 Research Evidence':
                             st.write(f'**In simple terms:** About **{coverage:.0f} out of every 100** historical observations fell within the predicted uncertainty ranges. The target was 90 out of 100.')
                             st.caption('Coverage is not forecast accuracy. Intervals can miss observations and coverage may differ across time periods; future coverage is not guaranteed.')
 
-            st.subheader('Are the results consistent over time?')
+            st.subheader('How does forecast accuracy change across time periods?')
             rolling = optional_csv('rolling_origin.csv')
             if rolling is not None:
                 rolling = rolling.rename(columns={c: c.strip().lower() for c in rolling.columns})
                 if {'fold', 'horizon_steps', 'model', 'mae'}.issubset(rolling.columns):
-                    folds = rolling[(pd.to_numeric(rolling.horizon_steps, errors='coerce') == selected) &
-                                    (rolling.model.astype(str).str.lower().isin(['rf', 'lgbm']))].copy()
+                    rolling['model_key'] = rolling['model'].astype(str).str.strip().str.lower().replace({
+                        'random forest': 'rf', 'random_forest': 'rf',
+                        'lightgbm': 'lgbm', 'light_gbm': 'lgbm'
+                    })
+                    folds = rolling[
+                        (pd.to_numeric(rolling['horizon_steps'], errors='coerce') == selected) &
+                        (rolling['model_key'].isin(['rf', 'lgbm']))
+                    ].copy()
                     folds['mae'] = pd.to_numeric(folds['mae'], errors='coerce')
-                    folds = folds.dropna(subset=['mae', 'fold'])
+                    folds['fold_number'] = pd.to_numeric(folds['fold'], errors='coerce')
+                    folds = folds.dropna(subset=['mae', 'fold_number']).sort_values('fold_number')
                     if not folds.empty:
-                        folds['Evaluation period'] = 'Period ' + folds['fold'].astype(str)
-                        folds['Method'] = folds['model'].map(model_name)
-                        fold_order = ['Period ' + str(x) for x in sorted(folds['fold'].unique(), key=str)]
-                        st.write('Each period represents a different chronological evaluation window. Compare the methods across periods; **lower error is better**.')
+                        folds['Evaluation period'] = folds['fold_number'].map(lambda x: f'Period {int(x)}')
+                        folds['Method'] = folds['model_key'].map(model_name)
+                        fold_order = [f'Period {int(x)}' for x in sorted(folds['fold_number'].unique())]
+                        methods = sorted(folds['Method'].unique())
+                        if len(methods) == 1:
+                            st.caption(
+                                f'Only **{methods[0]}** has saved rolling-origin results for '
+                                f'**{horizon_label(selected)}**. The overall comparison above evaluates '
+                                'other methods on a separate held-out test set; it does not imply that '
+                                'they have rolling-origin results.'
+                            )
+                        else:
+                            st.caption('Saved rolling-origin results compare ' + ' and '.join(methods) +
+                                       ' across chronological evaluation periods.')
+                        st.write('Each period is a separate chronological evaluation window. **Lower average error is better.**')
                         fold_chart = (
                             alt.Chart(folds)
-                            .mark_bar()
+                            .mark_bar(cornerRadiusEnd=3)
                             .encode(
-                                x=alt.X('Evaluation period:N', sort=fold_order, title='Chronological evaluation period'),
-                                xOffset=alt.XOffset('Method:N'),
-                                y=alt.Y('mae:Q', title='Average error (vehicles/hour)', scale=alt.Scale(zero=True)),
-                                color=alt.Color('Method:N', title='Forecasting method'),
+                                x=alt.X('Evaluation period:N', sort=fold_order,
+                                        title='Chronological evaluation period',
+                                        axis=alt.Axis(labelAngle=0)),
+                                xOffset=alt.XOffset('Method:N') if len(methods) > 1 else alt.value(0),
+                                y=alt.Y('mae:Q', title='Average error (vehicles/hour)',
+                                        scale=alt.Scale(zero=True)),
+                                color=alt.Color('Method:N', title='Evaluated method',
+                                                scale=alt.Scale(domain=['LightGBM', 'Random Forest'],
+                                                                range=['#1874bb', '#0e6475'])),
                                 tooltip=[alt.Tooltip('Evaluation period:N'), alt.Tooltip('Method:N'),
                                          alt.Tooltip('mae:Q', title='MAE (vehicles/hour)', format=',.2f')]
                             )
                             .properties(height=300)
                         )
                         st.altair_chart(fold_chart, use_container_width=True)
+                        if len(methods) == 1:
+                            series = folds.groupby('fold_number', as_index=False)['mae'].mean().sort_values('fold_number')
+                            if len(series) >= 2:
+                                first_error, last_error = float(series.iloc[0]['mae']), float(series.iloc[-1]['mae'])
+                                change = last_error - first_error
+                                direction = ('increased' if change > 0 else 'decreased' if change < 0 else 'remained unchanged')
+                                st.write(
+                                    f'**What this shows:** {methods[0]} average error {direction} '
+                                    f'from **{first_error:,.2f}** to **{last_error:,.2f} vehicles/hour** '
+                                    f'between the first and last saved evaluation periods. '
+                                    'Results can vary across time; this is not the overall test-set MAE.'
+                                )
+                        else:
+                            st.write('**What this shows:** Compare the bar heights for each method across '
+                                     'periods to see how its forecasting error varies over time. '
+                                     'These are separate evaluations from the overall test comparison.')
                         with st.expander('View exact error for each evaluation period', expanded=False):
                             fold_table = folds[['Evaluation period', 'Method', 'mae']].rename(
                                 columns={'mae': 'Average error (vehicles/hour)'})
                             st.dataframe(fold_table.round(2), hide_index=True, use_container_width=True)
                     else:
-                        st.caption('No rolling-origin results are available for these two methods at the selected horizon.')
+                        st.caption('No saved LightGBM or Random Forest rolling-origin results are available for this horizon.')
+                else:
+                    st.caption('Rolling-origin CSV is missing the fields needed to display this evaluation.')
             else:
                 st.caption('Rolling-origin evaluation data are not available in the repository.')
 
@@ -572,6 +613,11 @@ elif page=='📊 Research Evidence':
                         continue
                     st.markdown(f'**{heading}**')
                     show = data.copy()
+                    if 'horizon_steps' in show.columns:
+                        show = show[pd.to_numeric(show['horizon_steps'], errors='coerce') == selected].copy()
+                    if show.empty:
+                        st.caption('No saved records for the selected forecast horizon.')
+                        continue
                     if filename == 'paired_bootstrap.csv':
                         if 'comparison' in show.columns:
                             def readable_comparison(raw):
@@ -590,7 +636,7 @@ elif page=='📊 Research Evidence':
                             'CI_high': 'Confidence interval upper',
                             'block_steps': 'Bootstrap block length'
                         })
-                        st.caption('MAE difference = first method minus second method. Negative favors the first; positive favors the second. A confidence interval excluding zero supports a difference under the bootstrap assumptions.')
+                        st.caption('MAE difference = first method minus second method. Negative favors the first; positive favors the second. A confidence interval excluding zero supports a difference under the bootstrap assumptions. This table is optional technical evidence.')
                     st.dataframe(show.round(3), hide_index=True, use_container_width=True)
 
     else:
