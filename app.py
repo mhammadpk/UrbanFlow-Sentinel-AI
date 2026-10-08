@@ -582,9 +582,13 @@ elif page=='📊 Research Evidence':
                                 xOffset=alt.XOffset('Method:N') if len(methods) > 1 else alt.value(0),
                                 y=alt.Y('mae:Q', title='Average error (vehicles/hour)',
                                         scale=alt.Scale(zero=True)),
-                                color=alt.Color('Method:N', title='Evaluated method',
-                                                scale=alt.Scale(domain=['LightGBM', 'Random Forest'],
-                                                                range=['#1874bb', '#0e6475'])),
+                                color=(
+                                    alt.value('#1874bb')
+                                    if len(methods) == 1
+                                    else alt.Color('Method:N', title='Evaluated method',
+                                                   scale=alt.Scale(domain=['LightGBM', 'Random Forest'],
+                                                                   range=['#1874bb', '#0e6475']))
+                                ),
                                 tooltip=[alt.Tooltip('Evaluation period:N'), alt.Tooltip('Method:N'),
                                          alt.Tooltip('mae:Q', title='MAE (vehicles/hour)', format=',.2f')]
                             )
