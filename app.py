@@ -191,7 +191,7 @@ def traffic_volume_visual(predicted, observed, data, heading="Traffic volume at 
 
 st.sidebar.markdown('## 🚦 UrbanFlow Sentinel AI')
 st.sidebar.caption('Smart mobility • Research prototype')
-page=st.sidebar.radio('Explore', ['🏠 Overview','🧭 Guided Demo','📈 Forecast Explorer','🧠 AI Insights','📊 Research Evidence','ℹ️ About & Roadmap'],label_visibility='collapsed')
+page=st.sidebar.radio('Explore', ['🏠 Overview','🚦 Interactive Demo','📊 Research Evidence'],label_visibility='collapsed')
 st.sidebar.divider()
 st.sidebar.caption('DATA STATUS')
 st.sidebar.info('Historical research dataset · Not live traffic')
@@ -208,8 +208,8 @@ if page=='🏠 Overview':
         unsafe_allow_html=True,
     )
     st.info(
-        "**Start here:** Open **🧭 Guided Demo** in the sidebar, choose a forecast "
-        "horizon, and compare a saved AI prediction with what was later observed."
+        "**Start here:** Open **🚦 Interactive Demo** in the sidebar, choose a forecast "
+        "horizon, and compare a saved AI prediction with what was later observed. Explore trends and explanations using the tabs."
     )
     st.subheader("Research results at a glance")
     comparison = normalized_comparison()
@@ -274,226 +274,246 @@ if page=='🏠 Overview':
         "This is not a live traffic system or an operational digital twin."
     )
 
-elif page=='🧭 Guided Demo':
-    st.title('🧭 Guided Demo')
-    st.write('A complete demonstration using saved historical predictions—**no technical input or CSV required**.')
-    h=st.select_slider('Step 1 · How far ahead should the system forecast?',options=H,value=H[0],format_func=horizon_label)
-    df=read_predictions(h)
-    if df.empty: st.warning('No usable saved predictions.');st.stop()
-    n=min(len(df),240)
-    examples=df.tail(n).reset_index(drop=True)
-    i=st.selectbox(
-        'Step 2 · Choose a historical example',
-        options=list(range(n)),
-        index=min(24,n-1),
-        format_func=lambda j: examples.iloc[int(j)]['timestamp'].strftime('%d %b %Y, %H:%M'),
-        help='Select a date and time from the held-out historical test period.',
-    )
-    r=examples.iloc[int(i)]
-    st.markdown('<div class="step"><strong>Step 3 · Read the forecast</strong><br>Compare the AI prediction with the value observed later in the historical record.</div>',unsafe_allow_html=True)
-    a,b,c=st.columns(3)
-    a.metric('AI forecast',f"{r['predicted']:,.0f}",help='Estimated traffic volume in vehicles per hour')
-    b.metric('Observed later',f"{r['actual']:,.0f}",help='Actual traffic volume from the held-out historical dataset')
-    c.metric('Absolute difference',f"{abs(r['predicted']-r['actual']):,.0f}",help='Absolute forecast error for this example')
-    st.caption('All three values above are measured in vehicles/hour.')
-    traffic_volume_visual(
-        float(r['predicted']), float(r['actual']), df,
-        heading='Visual comparison for your selected historical example',
-    )
-    if pd.notna(r['lower']) and pd.notna(r['upper']):
-        st.info(f"**Prediction interval:** {r['lower']:,.0f}–{r['upper']:,.0f} vehicles/hour. This is an empirical uncertainty range, not a guarantee.")
-    row_idx=len(df)-n+int(i)
-    context=df.iloc[max(0,row_idx-12):min(len(df),row_idx+13)].copy()
-    st.line_chart(context.set_index('timestamp')[['actual','predicted']],height=330)
-    difference=float(r['predicted']-r['actual'])
-    if difference>0:
-        interpretation=f'The model forecast about {abs(difference):,.0f} more vehicles/hour than were subsequently observed.'
-    elif difference<0:
-        interpretation=f'The model forecast about {abs(difference):,.0f} fewer vehicles/hour than were subsequently observed.'
-    else:
-        interpretation='The predicted and observed traffic volumes match for this example.'
-    st.info('**Remember:** Higher traffic volume does not necessarily mean traffic congestion. These are historical test predictions, not live measurements.')
-    with st.expander('What do the numbers mean?'):
-        st.markdown('**AI forecast:** Estimated vehicles passing the sensor in the target hour.\n\n**Observed later:** Recorded vehicle count for that hour.\n\n**Absolute difference:** The gap between the prediction and the observed count.\n\n**Prediction interval:** A range derived from historical model errors; it is not guaranteed to contain every future observation.')
-    st.caption('All examples come from previously saved held-out research results. Selecting an example does not retrain the model.')
+    with st.expander('ℹ️ About the research and future roadmap', expanded=False):
+        st.subheader('Project scope and future roadmap')
+        st.markdown('**Research demonstration**')
+        st.write('UrbanFlow Sentinel AI is an explainable traffic-demand forecasting research prototype. It illustrates how historical traffic-volume observations can support short-term prediction and uncertainty-aware decision support.')
+        st.markdown('**How it works**')
+        a,b,c,d=st.columns(4)
+        for col,emoji,title,detail in [(a,'📥','Historical data','Hourly traffic observations'),(b,'🧹','Quality checks','Missingness and temporal features'),(c,'🤖','AI forecast','Models estimate future volume'),(d,'📊','Interpret','Forecast, uncertainty and validation')]:
+            with col:
+                st.markdown(f'<div class="card"><h4>{emoji} {title}</h4><p>{detail}</p></div>',unsafe_allow_html=True)
+        st.info('**Model distinction:** LightGBM supplies the saved interactive forecasts and chronological validation results. Random Forest achieved the lowest held-out MAE in the recorded model comparison; both are reported transparently in Research Evidence.')
+        st.markdown('**Available now**')
+        st.success('Historical forecasts, evaluation charts, guided demonstration, and downloadable historical records.')
+        st.markdown('**Future development — not yet validated**')
+        st.markdown('Multi-sensor traffic speed and occupancy data; geolocated hotspot forecasting; shorter forecasting horizons; operational data integration; evaluated intervention scenarios; **a future synchronized urban mobility digital twin**; Saudi-city pilot validation.')
+        st.markdown('**Data and responsible-use notes**')
+        st.write(f"**Dataset:** {meta.get('source','Historical research traffic-volume dataset')}")
+        st.write(f"**Outcome:** {meta.get('outcome_interpretation','Traffic volume, not measured congestion')}")
+        st.write('**Research limitations:** single-site data where applicable; empirical uncertainty intervals may vary across time; no causal intervention validation.')
+        st.markdown('**Developed by:** [Research, Development & Innovation Center | مركز البحث والتطوير والابتكار](https://firstcity.sa/ar/research) · First City for Information Technology')
+        with st.expander('Technical provenance'):
+            st.json(meta)
 
-elif page=='📈 Forecast Explorer':
-    st.title('📈 Forecast Explorer')
-    st.write('Explore real held-out research predictions and compare them with observed traffic volume.')
-    h=st.selectbox('Forecast horizon',H,format_func=horizon_label)
-    df=read_predictions(h)
-    if 'sensor_id' in df.columns and df.sensor_id.nunique()>1:
-        sensor=st.selectbox('Monitoring location',sorted(df.sensor_id.dropna().astype(str).unique()))
-        df=df[df.sensor_id.astype(str)==sensor]
-    if df.empty: st.warning('No records available.');st.stop()
-    max_rows=min(len(df),336)
-    window=st.slider('Number of recent historical observations',min(24,max_rows),max_rows,min(96,max_rows),step=1) if max_rows>=24 else max_rows
-    view=df.tail(window).copy()
-    a,b,c=st.columns(3)
-    a.metric('Historical observations',f'{len(df):,}')
-    b.metric('MAE · selected window',f"{(view.actual-view.predicted).abs().mean():,.1f}",help='Average absolute prediction error, in vehicles/hour')
-    c.metric('Forecast horizon',horizon_label(h))
-    st.subheader('Observed vs predicted traffic volume')
-    st.caption('Horizontal axis: historical date/time · Vertical axis: vehicles per hour. Closer lines indicate more accurate forecasts.')
-    st.line_chart(view.set_index('timestamp')[['actual','predicted']],height=360)
-    if view[['lower','upper']].notna().all().all():
-        with st.expander('Show uncertainty bounds',expanded=False):
-            st.line_chart(view.set_index('timestamp')[['lower','predicted','upper']],height=250)
-            st.caption('Prediction intervals are empirical. They may under-cover in particular months or changing conditions.')
-    with st.expander('Inspect and download historical records'):
-        st.dataframe(view[['timestamp','actual','predicted','lower','upper']].round(1),use_container_width=True,hide_index=True)
-        st.download_button('Download selected records',view.to_csv(index=False).encode(),f'urbanflow_forecasts_{h}h.csv','text/csv')
-    st.caption('Traffic volume is a demand measure. This chart does not represent measured speed, delays, or congestion hotspots.')
 
-elif page=='🧠 AI Insights':
-    st.title('🧠 AI Insights')
-    st.write('Discover which input patterns the AI model relies on most. Larger SHAP bars indicate stronger average influence on the model output—not causes of congestion.')
-    h=st.selectbox('Explain forecast horizon',H,format_func=horizon_label)
-    shap=optional_csv(f'shap_importance_h{h}.csv')
-    if shap is not None and not shap.empty:
-        shap=shap.rename(columns={c:c.strip().lower() for c in shap.columns})
-        if {'feature','mean_abs_shap'}.issubset(shap.columns):
-            shap['mean_abs_shap']=pd.to_numeric(shap['mean_abs_shap'],errors='coerce')
-            view=shap.dropna(subset=['feature','mean_abs_shap']).sort_values('mean_abs_shap',ascending=False).head(8).copy()
-            view['friendly_name']=view['feature'].map(safe_feature_name)
-            if not view.empty:
-                st.subheader("What information influences the AI forecast?")
+elif page=='🚦 Interactive Demo':
+    st.title('🚦 Interactive Demo')
+    st.write('**Try a forecast → explore traffic patterns → understand the AI.** All examples use saved historical results, not live sensors.')
+    tab_forecast, tab_trends, tab_ai = st.tabs(['🚗 Try a Forecast', '📈 Explore Trends', '🧠 Understand AI'])
+    with tab_forecast:
+        st.subheader('Try a historical traffic forecast')
+        st.write('Choose a time and forecast horizon. The example is taken from saved historical test results; no data upload is needed.')
+        h=st.select_slider('Step 1 · How far ahead should the system forecast?',options=H,value=H[0],format_func=horizon_label)
+        df=read_predictions(h)
+        if df.empty: st.warning('No usable saved predictions.');st.stop()
+        n=min(len(df),240)
+        examples=df.tail(n).reset_index(drop=True)
+        i=st.selectbox(
+            'Step 2 · Choose a historical example',
+            options=list(range(n)),
+            index=min(24,n-1),
+            format_func=lambda j: examples.iloc[int(j)]['timestamp'].strftime('%d %b %Y, %H:%M'),
+            help='Select a date and time from the held-out historical test period.',
+        )
+        r=examples.iloc[int(i)]
+        st.markdown('<div class="step"><strong>Step 3 · Read the forecast</strong><br>Compare the AI prediction with the value observed later in the historical record.</div>',unsafe_allow_html=True)
+        a,b,c=st.columns(3)
+        a.metric('AI forecast',f"{r['predicted']:,.0f}",help='Estimated traffic volume in vehicles per hour')
+        b.metric('Observed later',f"{r['actual']:,.0f}",help='Actual traffic volume from the held-out historical dataset')
+        c.metric('Absolute difference',f"{abs(r['predicted']-r['actual']):,.0f}",help='Absolute forecast error for this example')
+        st.caption('All three values above are measured in vehicles/hour.')
+        traffic_volume_visual(
+            float(r['predicted']), float(r['actual']), df,
+            heading='Visual comparison for your selected historical example',
+        )
+        if pd.notna(r['lower']) and pd.notna(r['upper']):
+            st.info(f"**Prediction interval:** {r['lower']:,.0f}–{r['upper']:,.0f} vehicles/hour. This is an empirical uncertainty range, not a guarantee.")
+        row_idx=len(df)-n+int(i)
+        context=df.iloc[max(0,row_idx-12):min(len(df),row_idx+13)].copy()
+        st.line_chart(context.set_index('timestamp')[['actual','predicted']].rename(columns={'actual':'Observed traffic','predicted':'AI-predicted traffic'}),height=330)
+        st.info('**Remember:** Higher traffic volume does not necessarily mean traffic congestion. These are historical test predictions, not live measurements.')
+        with st.expander('What do the numbers mean?'):
+            st.markdown('**AI forecast:** Estimated vehicles passing the sensor in the target hour.\n\n**Observed later:** Recorded vehicle count for that hour.\n\n**Absolute difference:** The gap between the prediction and the observed count.\n\n**Prediction interval:** A range derived from historical model errors; it is not guaranteed to contain every future observation.')
+        st.caption('All examples come from previously saved held-out research results. Selecting an example does not retrain the model.')
 
-                st.caption(
-                    "The chart ranks the input signals used by the AI model. "
-                    "Longer bars indicate greater average influence on predictions. "
-                    "These are SHAP importance values, not percentages."
-                )
+    with tab_trends:
+        st.subheader('Explore historical traffic trends')
+        st.write('Explore real held-out research predictions and compare them with observed traffic volume.')
+        h=st.selectbox('Forecast horizon',H,format_func=horizon_label)
+        df=read_predictions(h)
+        if 'sensor_id' in df.columns and df.sensor_id.nunique()>1:
+            sensor=st.selectbox('Monitoring location',sorted(df.sensor_id.dropna().astype(str).unique()))
+            df=df[df.sensor_id.astype(str)==sensor]
+        if df.empty: st.warning('No records available.');st.stop()
+        max_rows=min(len(df),336)
+        window=st.slider('Number of recent historical observations',min(24,max_rows),max_rows,min(96,max_rows),step=1) if max_rows>=24 else max_rows
+        view=df.tail(window).copy()
+        a,b,c=st.columns(3)
+        a.metric('Historical observations',f'{len(df):,}')
+        b.metric('MAE · selected window',f"{(view.actual-view.predicted).abs().mean():,.1f}",help='Average absolute prediction error, in vehicles/hour')
+        c.metric('Forecast horizon',horizon_label(h))
+        st.subheader('Observed vs predicted traffic volume')
+        st.caption('Horizontal axis: historical date/time · Vertical axis: vehicles per hour. Closer lines indicate more accurate forecasts.')
+        st.line_chart(view.set_index('timestamp')[['actual','predicted']].rename(columns={'actual':'Observed traffic','predicted':'AI-predicted traffic'}),height=360)
+        if view[['lower','upper']].notna().all().all():
+            with st.expander('Show uncertainty bounds',expanded=False):
+                st.line_chart(view.set_index('timestamp')[['lower','predicted','upper']],height=250)
+                st.caption('Prediction intervals are empirical. They may under-cover in particular months or changing conditions.')
+        with st.expander('Inspect and download historical records'):
+            st.dataframe(view[['timestamp','actual','predicted','lower','upper']].round(1),use_container_width=True,hide_index=True)
+            st.download_button('Download selected records',view.to_csv(index=False).encode(),f'urbanflow_forecasts_{h}h.csv','text/csv')
+        st.caption('Traffic volume is a demand measure. This chart does not represent measured speed, delays, or congestion hotspots.')
 
-                import altair as alt
+    with tab_ai:
+        st.subheader('Understand what influences the AI')
+        st.write('See which historical traffic and calendar signals the model uses most. These explanations describe prediction behavior, not causes of congestion.')
+        h=st.selectbox('Explain forecast horizon',H,format_func=horizon_label)
+        shap=optional_csv(f'shap_importance_h{h}.csv')
+        if shap is not None and not shap.empty:
+            shap=shap.rename(columns={c:c.strip().lower() for c in shap.columns})
+            if {'feature','mean_abs_shap'}.issubset(shap.columns):
+                shap['mean_abs_shap']=pd.to_numeric(shap['mean_abs_shap'],errors='coerce')
+                view=shap.dropna(subset=['feature','mean_abs_shap']).sort_values('mean_abs_shap',ascending=False).head(8).copy()
+                view['friendly_name']=view['feature'].map(safe_feature_name)
+                if not view.empty:
+                    st.subheader("What information influences the AI forecast?")
 
-                chart_data = view[
-                    ["friendly_name", "mean_abs_shap"]
-                ].copy()
-
-                chart = (
-                    alt.Chart(chart_data)
-                    .mark_bar(color="#1673D1", cornerRadiusEnd=4)
-                    .encode(
-                        x=alt.X(
-                            "mean_abs_shap:Q",
-                            title="Average absolute SHAP contribution"
-                        ),
-                        y=alt.Y(
-                            "friendly_name:N",
-                            sort="-x",
-                            title=None,
-                            axis=alt.Axis(labelLimit=260)
-                        ),
-                        tooltip=[
-                            alt.Tooltip("friendly_name:N", title="Input signal"),
-                            alt.Tooltip(
-                                "mean_abs_shap:Q",
-                                title="Mean absolute SHAP",
-                                format=",.2f"
-                            )
-                        ]
-                    )
-                    .properties(height=350)
-                )
-
-                st.altair_chart(chart, use_container_width=True)
-
-                st.markdown("#### What does the SHAP value mean?")
-                st.info(
-                    "**Mean absolute SHAP value** is the average size of a signal's "
-                    "contribution to the model's predictions relative to a reference "
-                    "prediction, regardless of whether it pushes a prediction up or down. "
-                    "Longer bars mean greater average influence across the evaluated samples."
-                )
-                st.caption(
-                    "The values are not percentages, forecasting errors, or traffic congestion "
-                    "measurements. They do not show whether a signal raises or lowers an "
-                    "individual prediction. Correlated signals can share predictive information."
-                )
-
-                st.markdown("#### Which signals influence the model most?")
-                top_two = view.nlargest(2, "mean_abs_shap")
-                if len(top_two) >= 2:
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("Strongest signal", top_two.iloc[0]["friendly_name"])
-                    with col2:
-                        st.metric("Second strongest signal", top_two.iloc[1]["friendly_name"])
-                    st.write(
-                        f"For **{horizon_label(h)}**, **{top_two.iloc[0]['friendly_name']}** "
-                        f"has the largest average influence, followed by "
-                        f"**{top_two.iloc[1]['friendly_name']}**. Other signals have "
-                        "smaller individual contributions but may still be useful together."
-                    )
-                else:
-                    st.write(
-                        f"The most influential signal for {horizon_label(h)} is "
-                        f"**{top_two.iloc[0]['friendly_name']}**."
-                    )
-
-                with st.expander("What does each input signal mean?", expanded=True):
-                    explanations = {
-                        "Latest observed traffic volume":
-                            "The most recent traffic-volume measurement available at the forecast starting time (forecast origin).",
-                        "Hour of day":
-                            "The hour-of-day input used to recognize recurring daily traffic patterns.",
-                        "Day of week":
-                            "The day-of-week input used to recognize recurring weekly patterns.",
-                        "Month of year":
-                            "The calendar month, which may capture seasonal patterns.",
-                        "Weekend":
-                            "Indicates whether the time falls on a weekend.",
-                        "Recent 3-hour average":
-                            "Average traffic volume across a recent three-hour window.",
-                        "Recent 24-hour average":
-                            "Average traffic volume across a recent 24-hour window.",
-                        "Recent 7-day average":
-                            "Average traffic volume across a recent seven-day window."
-                    }
-                    for _, feature_row in view.iterrows():
-                        signal = feature_row["friendly_name"]
-                        original = str(feature_row["feature"]).replace("num__", "").replace("cat__", "")
-                        if original.startswith("lag_"):
-                            try:
-                                hours = int(original.split("_")[-1])
-                                meaning = f"Traffic volume recorded {hours} hour(s) before the forecast starting time."
-                            except ValueError:
-                                meaning = "A historical traffic measurement used by the model."
-                        else:
-                            meaning = explanations.get(
-                                signal, "A historical or time-related input used by the forecasting model."
-                            )
-                        st.markdown(f"**{signal}** — {meaning}")
                     st.caption(
-                        "Forecast origin means the time from which a prediction is made. "
-                        "For example, a 1-hour-ahead forecast made at 8 AM predicts traffic "
-                        "for 9 AM. Exact rolling-window alignment follows the research feature-engineering setup."
+                        "The chart ranks the input signals used by the AI model. "
+                        "Longer bars indicate greater average influence on predictions. "
+                        "These are SHAP importance values, not percentages."
                     )
 
-                with st.expander(
-                    "🔬 Advanced details: View AI feature importance data", expanded=False
-                ):
-                    technical_data = view[
-                        ["friendly_name", "feature", "mean_abs_shap"]
+                    import altair as alt
+
+                    chart_data = view[
+                        ["friendly_name", "mean_abs_shap"]
                     ].copy()
-                    technical_data.columns = [
-                        "Input signal", "Original feature name", "Mean absolute SHAP value"
-                    ]
-                    st.dataframe(
-                        technical_data.round(2), hide_index=True, use_container_width=True
+
+                    chart = (
+                        alt.Chart(chart_data)
+                        .mark_bar(color="#1673D1", cornerRadiusEnd=4)
+                        .encode(
+                            x=alt.X(
+                                "mean_abs_shap:Q",
+                                title="Average absolute SHAP contribution"
+                            ),
+                            y=alt.Y(
+                                "friendly_name:N",
+                                sort="-x",
+                                title=None,
+                                axis=alt.Axis(labelLimit=260)
+                            ),
+                            tooltip=[
+                                alt.Tooltip("friendly_name:N", title="Input signal"),
+                                alt.Tooltip(
+                                    "mean_abs_shap:Q",
+                                    title="Mean absolute SHAP",
+                                    format=",.2f"
+                                )
+                            ]
+                        )
+                        .properties(height=350)
+                    )
+
+                    st.altair_chart(chart, use_container_width=True)
+
+                    st.markdown("#### What does the SHAP value mean?")
+                    st.info(
+                        "**Mean absolute SHAP value** is the average size of a signal's "
+                        "contribution to the model's predictions relative to a reference "
+                        "prediction, regardless of whether it pushes a prediction up or down. "
+                        "Longer bars mean greater average influence across the evaluated samples."
                     )
                     st.caption(
-                        "Original feature names and saved global SHAP importance scores "
-                        "are provided for research transparency."
+                        "The values are not percentages, forecasting errors, or traffic congestion "
+                        "measurements. They do not show whether a signal raises or lowers an "
+                        "individual prediction. Correlated signals can share predictive information."
                     )
-            else:st.warning('The selected SHAP CSV has no valid importance values.')
+
+                    st.markdown("#### Which signals influence the model most?")
+                    top_two = view.nlargest(2, "mean_abs_shap")
+                    if len(top_two) >= 2:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Strongest signal", top_two.iloc[0]["friendly_name"])
+                        with col2:
+                            st.metric("Second strongest signal", top_two.iloc[1]["friendly_name"])
+                        st.write(
+                            f"For **{horizon_label(h)}**, **{top_two.iloc[0]['friendly_name']}** "
+                            f"has the largest average influence, followed by "
+                            f"**{top_two.iloc[1]['friendly_name']}**. Other signals have "
+                            "smaller individual contributions but may still be useful together."
+                        )
+                    else:
+                        st.write(
+                            f"The most influential signal for {horizon_label(h)} is "
+                            f"**{top_two.iloc[0]['friendly_name']}**."
+                        )
+
+                    with st.expander("What does each input signal mean?", expanded=True):
+                        explanations = {
+                            "Latest observed traffic volume":
+                                "The most recent traffic-volume measurement available at the forecast starting time (forecast origin).",
+                            "Hour of day":
+                                "The hour-of-day input used to recognize recurring daily traffic patterns.",
+                            "Day of week":
+                                "The day-of-week input used to recognize recurring weekly patterns.",
+                            "Month of year":
+                                "The calendar month, which may capture seasonal patterns.",
+                            "Weekend":
+                                "Indicates whether the time falls on a weekend.",
+                            "Recent 3-hour average":
+                                "Average traffic volume across a recent three-hour window.",
+                            "Recent 24-hour average":
+                                "Average traffic volume across a recent 24-hour window.",
+                            "Recent 7-day average":
+                                "Average traffic volume across a recent seven-day window."
+                        }
+                        for _, feature_row in view.iterrows():
+                            signal = feature_row["friendly_name"]
+                            original = str(feature_row["feature"]).replace("num__", "").replace("cat__", "")
+                            if original.startswith("lag_"):
+                                try:
+                                    hours = int(original.split("_")[-1])
+                                    meaning = f"Traffic volume recorded {hours} hour(s) before the forecast starting time."
+                                except ValueError:
+                                    meaning = "A historical traffic measurement used by the model."
+                            else:
+                                meaning = explanations.get(
+                                    signal, "A historical or time-related input used by the forecasting model."
+                                )
+                            st.markdown(f"**{signal}** — {meaning}")
+                        st.caption(
+                            "Forecast origin means the time from which a prediction is made. "
+                            "For example, a 1-hour-ahead forecast made at 8 AM predicts traffic "
+                            "for 9 AM. Exact rolling-window alignment follows the research feature-engineering setup."
+                        )
+
+                    with st.expander(
+                        "🔬 Advanced details: View AI feature importance data", expanded=False
+                    ):
+                        technical_data = view[
+                            ["friendly_name", "feature", "mean_abs_shap"]
+                        ].copy()
+                        technical_data.columns = [
+                            "Input signal", "Original feature name", "Mean absolute SHAP value"
+                        ]
+                        st.dataframe(
+                            technical_data.round(2), hide_index=True, use_container_width=True
+                        )
+                        st.caption(
+                            "Original feature names and saved global SHAP importance scores "
+                            "are provided for research transparency."
+                        )
+                else:st.warning('The selected SHAP CSV has no valid importance values.')
+            else:
+                st.warning(f'The h{h} SHAP file is present but lacks feature and mean_abs_shap columns.')
         else:
-            st.warning(f'The h{h} SHAP file is present but lacks feature and mean_abs_shap columns.')
-    else:
-        st.warning(f'SHAP results for {horizon_label(h)} could not be loaded. Verify research/shap_importance_h{h}.csv exists on the GitHub main branch.')
-        with st.expander('Troubleshooting: expected paths'):
-            st.code('\n'.join(str(p.relative_to(BASE)) for p in [BASE/f'shap_importance_h{h}.csv',BASE/'metrics'/f'shap_importance_h{h}.csv',BASE/'research'/f'shap_importance_h{h}.csv']))
+            st.warning(f'SHAP results for {horizon_label(h)} could not be loaded. Verify research/shap_importance_h{h}.csv exists on the GitHub main branch.')
+            with st.expander('Troubleshooting: expected paths'):
+                st.code('\n'.join(str(p.relative_to(BASE)) for p in [BASE/f'shap_importance_h{h}.csv',BASE/'metrics'/f'shap_importance_h{h}.csv',BASE/'research'/f'shap_importance_h{h}.csv']))
 
 elif page=='📊 Research Evidence':
     st.title('📊 Research Evidence')
@@ -749,27 +769,6 @@ elif page=='📊 Research Evidence':
 
     st.caption('**Study limitation:** Historical single-site traffic-volume forecasting does not establish measured congestion reduction, transferability to other cities, or effectiveness of traffic interventions.')
 
-else:
-    st.title('ℹ️ About & Roadmap')
-    st.subheader('Research demonstration')
-    st.write('UrbanFlow Sentinel AI is an explainable traffic-demand forecasting research prototype. It illustrates how historical traffic-volume observations can support short-term prediction and uncertainty-aware decision support.')
-    st.subheader('How it works')
-    a,b,c,d=st.columns(4)
-    for col,emoji,title,detail in [(a,'📥','Historical data','Hourly traffic observations'),(b,'🧹','Quality checks','Missingness and temporal features'),(c,'🤖','AI forecast','Models estimate future volume'),(d,'📊','Interpret','Forecast, uncertainty and validation')]:
-        with col:
-            st.markdown(f'<div class="card"><h4>{emoji} {title}</h4><p>{detail}</p></div>',unsafe_allow_html=True)
-    st.info('**Model distinction:** LightGBM supplies the saved interactive forecasts and chronological validation results. Random Forest achieved the lowest held-out MAE in the recorded model comparison; both are reported transparently in Research Evidence.')
-    st.subheader('What is available now')
-    st.success('Historical forecasts, evaluation charts, guided demonstration, and downloadable historical records.')
-    st.subheader('Future development — not yet validated')
-    st.markdown('Multi-sensor traffic speed and occupancy data; geolocated hotspot forecasting; shorter forecasting horizons; operational data integration; evaluated intervention scenarios; **a future synchronized urban mobility digital twin**; Saudi-city pilot validation.')
-    st.subheader('Data and responsible-use notes')
-    st.write(f"**Dataset:** {meta.get('source','Historical research traffic-volume dataset')}")
-    st.write(f"**Outcome:** {meta.get('outcome_interpretation','Traffic volume, not measured congestion')}")
-    st.write('**Research limitations:** single-site data where applicable; empirical uncertainty intervals may vary across time; no causal intervention validation.')
-    st.markdown('**Developed by:** [Research, Development & Innovation Center | مركز البحث والتطوير والابتكار](https://firstcity.sa/ar/research) · First City for Information Technology')
-    with st.expander('Technical provenance'):
-        st.json(meta)
 
 st.divider()
 st.caption('UrbanFlow Sentinel AI · Research demonstration · Historical observations only · No operational traffic-control recommendations')
