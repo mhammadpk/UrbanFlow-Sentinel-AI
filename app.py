@@ -416,61 +416,190 @@ elif page=='🧠 AI Insights':
 
 elif page=='📊 Research Evidence':
     st.title('📊 Research Evidence')
-    st.write('How well did the models predict historical traffic? Lower forecasting error is better. These are held-out research results, not live performance.')
-    comp=normalized_comparison()
+    st.write('How accurately do different methods forecast future traffic volume? All results are from held-out historical observations, not live traffic.')
+    comp = normalized_comparison()
     if comp is not None and not comp.empty:
-        horizons=sorted(set(int(x) for x in comp.horizon_steps.dropna()))
-        selected=st.selectbox('Choose forecast horizon',horizons,format_func=horizon_label)
-        part=comp[comp.horizon_steps==selected].copy().sort_values('mae')
-        best=part.iloc[0]
-        rf=metric_row(selected,'rf'); lgbm=metric_row(selected,'lgbm'); profile=metric_row(selected,'historical_profile')
-        a,b,c,d=st.columns(4)
-        a.metric('Best model',model_name(best['model']))
-        b.metric('Best MAE',f"{best['mae']:,.1f}",help='Average absolute error in vehicles/hour; lower is better.')
-        c.metric('LightGBM R²',f"{float(lgbm['r2']):.3f}" if lgbm is not None and 'r2' in lgbm else 'N/A',help='Fraction of test-set variation explained by the LightGBM forecasts.')
-        gain=percent_improvement(selected)
-        d.metric('RF error reduction vs profile',f'{gain:.1f}%' if gain is not None else 'N/A',help='Reduction in MAE compared with the historical-profile baseline, not a reduction in traffic or congestion.')
-        st.subheader('Model comparison — average forecast error')
-        plot=part[['model','mae']].copy()
-        plot['model']=plot['model'].map(model_name)
-        st.bar_chart(plot.set_index('model')['mae'].sort_values(),horizontal=True,height=340)
-        st.caption('Each bar shows mean absolute error (MAE) on the saved held-out test data, measured in vehicles/hour. Shorter bars are better.')
-        if rf is not None and lgbm is not None:
-            st.info(f"**What the evidence says:** Random Forest has MAE {rf.mae:,.1f}; the deployed LightGBM model has MAE {lgbm.mae:,.1f} for {horizon_label(selected)}. The deployment uses LightGBM, not the lowest-MAE model. This distinction is intentional and transparent.")
-        with st.expander('View full model comparison and download'):
-            display=part.copy();display['model']=display['model'].map(model_name)
-            st.dataframe(display.round(3),hide_index=True,use_container_width=True)
-            st.download_button('Download model comparison',comp.to_csv(index=False).encode(),'model_comparison.csv','text/csv')
-        st.subheader('Reliability and validation')
-        conf=optional_csv('conformal.csv')
-        if conf is not None:
-            conf.columns=conf.columns.str.strip().str.lower()
-            if {'horizon_steps','model','coverage'}.issubset(conf.columns):
-                cc=conf[(pd.to_numeric(conf.horizon_steps,errors='coerce')==selected)&(conf.model.astype(str).str.lower()=='lgbm')]
-                if not cc.empty:
-                    coverage=float(cc.iloc[0]['coverage'])*100
-                    st.metric('Observed interval coverage (LightGBM)',f'{coverage:.1f}%',help='Share of test observations within the empirical prediction interval. Nominal target is 90%; actual coverage varies by month.')
-                    st.caption('The prediction interval has a nominal 90% target; empirical coverage is not guaranteed in every month.')
-        rolling=optional_csv('rolling_origin.csv')
-        if rolling is not None:
-            rolling=rolling.rename(columns={c:c.strip().lower() for c in rolling.columns})
-            if {'fold','horizon_steps','model','mae'}.issubset(rolling.columns):
-                folds=rolling[(pd.to_numeric(rolling.horizon_steps,errors='coerce')==selected)&(rolling.model.astype(str).str.lower().isin(['rf','lgbm']))]
-                if not folds.empty:
-                    st.markdown('**Rolling-origin validation** — how error changes across different chronological evaluation folds')
-                    st.line_chart(folds.pivot_table(index='fold',columns='model',values='mae'),height=240)
-        with st.expander('Additional statistical and robustness results'):
-            for filename,title in [('paired_bootstrap.csv','Paired model comparisons'),('missing_history_sensitivity.csv','Missing-history sensitivity'),('monthly_coverage.csv','Monthly uncertainty coverage'),('subgroups.csv','Peak/off-peak analysis')]:
-                data=optional_csv(filename)
-                if data is not None:
-                    st.markdown(f'**{title}**')
-                    st.dataframe(data,hide_index=True,use_container_width=True)
+        import altair as alt
+
+        horizons = sorted(set(int(x) for x in comp.horizon_steps.dropna()))
+        selected = st.selectbox('Choose forecast horizon', horizons, format_func=horizon_label)
+        part = comp[comp.horizon_steps == selected].copy().sort_values('mae')
+        if part.empty:
+            st.warning('No model comparisons are available for this horizon.')
+        else:
+            best = part.iloc[0]
+            rf = metric_row(selected, 'rf')
+            lgbm = metric_row(selected, 'lgbm')
+            profile = metric_row(selected, 'historical_profile')
+            gain = percent_improvement(selected)
+
+            st.subheader('Research performance at a glance')
+            c1, c2, c3 = st.columns(3)
+            c1.metric('Lowest-error method', model_name(best['model']),
+                      help='Method with the smallest mean absolute error (MAE) for this forecast horizon.')
+            c2.metric('Lowest average error', f"{float(best['mae']):,.1f} vehicles/hour",
+                      help='Mean absolute error (MAE): average size of the prediction error. Lower is better.')
+            c3.metric('Random Forest error reduction vs historical profile',
+                      f'{gain:.1f}%' if gain is not None else 'Not available',
+                      help='Percentage reduction in MAE relative to the historical-profile baseline; not a reduction in traffic or congestion.')
+            st.caption('These results describe forecasting errors on a historical test dataset, not improvements in road conditions.')
+
+            st.subheader('Which forecasting method predicts traffic most accurately?')
+            st.write('**Lower bars are better:** each bar shows average prediction error in vehicles per hour (MAE).')
+            plot = part[['model', 'mae']].copy()
+            plot['Method'] = plot['model'].map(model_name)
+            ml_ids = {'rf', 'lgbm', 'ridge'}
+            plot['Category'] = plot['model'].astype(str).str.lower().map(
+                lambda x: 'Machine-learning model' if x in ml_ids else 'Reference baseline'
+            )
+            chart = (
+                alt.Chart(plot)
+                .mark_bar(cornerRadiusEnd=3)
+                .encode(
+                    x=alt.X('mae:Q', title='Mean absolute error (vehicles/hour)', scale=alt.Scale(zero=True)),
+                    y=alt.Y('Method:N', sort=alt.EncodingSortField(field='mae', order='ascending'),
+                            title=None, axis=alt.Axis(labelLimit=230)),
+                    color=alt.Color('Category:N', title='Forecasting approach',
+                                    scale=alt.Scale(domain=['Machine-learning model', 'Reference baseline'],
+                                                    range=['#1874bb', '#8796a8'])),
+                    tooltip=[alt.Tooltip('Method:N'), alt.Tooltip('Category:N'),
+                             alt.Tooltip('mae:Q', title='Average error (vehicles/hour)', format=',.2f')]
+                )
+                .properties(height=max(280, len(plot) * 43))
+            )
+            st.altair_chart(chart, use_container_width=True)
+            if rf is not None and lgbm is not None:
+                summary = (f'**What the results show for {horizon_label(selected)}:** '
+                           f'Random Forest has an average error of **{float(rf.mae):,.1f}** vehicles/hour; '
+                           f'LightGBM has **{float(lgbm.mae):,.1f}** vehicles/hour and supplies the saved forecasts in this demonstration.')
+                if profile is not None:
+                    summary += f' The historical-profile baseline has **{float(profile.mae):,.1f}** vehicles/hour of error.'
+                st.info(summary)
+            else:
+                st.info(f'The lowest-error method in this comparison is **{model_name(best["model"])}**. Lower MAE indicates more accurate predictions on the held-out dataset.')
+
+            with st.expander('What does each forecasting method mean?', expanded=False):
+                st.markdown('**Machine-learning models** — fitted to historical data:')
+                st.markdown('**Random Forest:** Combines many decision trees to predict future traffic volume.\n\n'
+                            '**LightGBM:** Uses boosted decision trees to learn traffic patterns; its saved predictions power the interactive demo.\n\n'
+                            '**Ridge regression:** A regularized linear regression model relating historical inputs to future traffic.')
+                st.markdown('**Reference baselines** — simpler forecasting approaches used for comparison:')
+                st.markdown('**Current traffic (persistence):** Uses the latest observed traffic volume as the future forecast.\n\n'
+                            '**Previous day:** Uses traffic recorded at the corresponding time on the previous day.\n\n'
+                            '**Previous week:** Uses traffic recorded at the corresponding time one week earlier.\n\n'
+                            '**Historical profile:** Uses typical traffic patterns learned from historical training data; exact grouping follows the experiment configuration.')
+                st.caption('Baselines are legitimate forecasting methods, not necessarily trained AI models. They help test whether a more complex model provides added value.')
+
+            st.subheader('How reliable are the predictions?')
+            conf = optional_csv('conformal.csv')
+            if conf is not None:
+                conf.columns = conf.columns.str.strip().str.lower()
+                if {'horizon_steps', 'model', 'coverage'}.issubset(conf.columns):
+                    cc = conf[(pd.to_numeric(conf.horizon_steps, errors='coerce') == selected) &
+                              (conf.model.astype(str).str.lower() == 'lgbm')]
+                    if not cc.empty:
+                        raw_coverage = float(pd.to_numeric(cc.iloc[0]['coverage'], errors='coerce'))
+                        if np.isfinite(raw_coverage) and 0 <= raw_coverage <= 1:
+                            coverage = raw_coverage * 100
+                            st.metric('Observed prediction-interval coverage (LightGBM)', f'{coverage:.1f}%',
+                                      help='Share of historical test observations within the saved prediction intervals; nominal target is 90%.')
+                            st.write(f'**In simple terms:** About **{coverage:.0f} out of every 100** historical observations fell within the predicted uncertainty ranges. The target was 90 out of 100.')
+                            st.caption('Coverage is not forecast accuracy. Intervals can miss observations and coverage may differ across time periods; future coverage is not guaranteed.')
+
+            st.subheader('Are the results consistent over time?')
+            rolling = optional_csv('rolling_origin.csv')
+            if rolling is not None:
+                rolling = rolling.rename(columns={c: c.strip().lower() for c in rolling.columns})
+                if {'fold', 'horizon_steps', 'model', 'mae'}.issubset(rolling.columns):
+                    folds = rolling[(pd.to_numeric(rolling.horizon_steps, errors='coerce') == selected) &
+                                    (rolling.model.astype(str).str.lower().isin(['rf', 'lgbm']))].copy()
+                    folds['mae'] = pd.to_numeric(folds['mae'], errors='coerce')
+                    folds = folds.dropna(subset=['mae', 'fold'])
+                    if not folds.empty:
+                        folds['Evaluation period'] = 'Period ' + folds['fold'].astype(str)
+                        folds['Method'] = folds['model'].map(model_name)
+                        fold_order = ['Period ' + str(x) for x in sorted(folds['fold'].unique(), key=str)]
+                        st.write('Each period represents a different chronological evaluation window. Compare the methods across periods; **lower error is better**.')
+                        fold_chart = (
+                            alt.Chart(folds)
+                            .mark_bar()
+                            .encode(
+                                x=alt.X('Evaluation period:N', sort=fold_order, title='Chronological evaluation period'),
+                                xOffset=alt.XOffset('Method:N'),
+                                y=alt.Y('mae:Q', title='Average error (vehicles/hour)', scale=alt.Scale(zero=True)),
+                                color=alt.Color('Method:N', title='Forecasting method'),
+                                tooltip=[alt.Tooltip('Evaluation period:N'), alt.Tooltip('Method:N'),
+                                         alt.Tooltip('mae:Q', title='MAE (vehicles/hour)', format=',.2f')]
+                            )
+                            .properties(height=300)
+                        )
+                        st.altair_chart(fold_chart, use_container_width=True)
+                        with st.expander('View exact error for each evaluation period', expanded=False):
+                            fold_table = folds[['Evaluation period', 'Method', 'mae']].rename(
+                                columns={'mae': 'Average error (vehicles/hour)'})
+                            st.dataframe(fold_table.round(2), hide_index=True, use_container_width=True)
+                    else:
+                        st.caption('No rolling-origin results are available for these two methods at the selected horizon.')
+            else:
+                st.caption('Rolling-origin evaluation data are not available in the repository.')
+
+            with st.expander('Advanced research details: Full comparison and download', expanded=False):
+                display = part.copy()
+                display['model'] = display['model'].map(model_name)
+                display = display.rename(columns={
+                    'horizon_steps': 'Forecast horizon (hours)',
+                    'model': 'Forecasting method',
+                    'n': 'Test examples',
+                    'mae': 'Average absolute error (MAE)',
+                    'rmse': 'Root mean squared error (RMSE)',
+                    'r2': 'Explained variation (R²)'
+                })
+                st.dataframe(display.round(3), hide_index=True, use_container_width=True)
+                st.caption('MAE is the average absolute prediction error; lower is better. RMSE gives more weight to large errors; lower is better. R² summarizes explained variation; higher is generally better.')
+                st.download_button('Download original model comparison CSV',
+                                   comp.to_csv(index=False).encode(), 'model_comparison.csv', 'text/csv')
+
+            with st.expander('Advanced research validation (optional)', expanded=False):
+                st.caption('These saved research tables are optional technical evidence, not additional live system capabilities.')
+                for filename, heading in [
+                    ('paired_bootstrap.csv', 'Paired model comparisons'),
+                    ('missing_history_sensitivity.csv', 'Sensitivity to missing traffic history'),
+                    ('monthly_coverage.csv', 'Prediction-interval coverage by month'),
+                    ('subgroups.csv', 'Peak and off-peak performance')
+                ]:
+                    data = optional_csv(filename)
+                    if data is None or data.empty:
+                        continue
+                    st.markdown(f'**{heading}**')
+                    show = data.copy()
+                    if filename == 'paired_bootstrap.csv':
+                        if 'comparison' in show.columns:
+                            def readable_comparison(raw):
+                                raw = str(raw)
+                                if '_minus_' not in raw:
+                                    return raw.replace('_', ' ').title()
+                                left, right = raw.split('_minus_', 1)
+                                return f'{model_name(left)} minus {model_name(right)}'
+                            show['comparison'] = show['comparison'].map(readable_comparison)
+                        show = show.rename(columns={
+                            'horizon_steps': 'Forecast horizon (hours)',
+                            'comparison': 'Compared methods',
+                            'n_common': 'Shared test examples',
+                            'delta_MAE': 'MAE difference',
+                            'CI_low': 'Confidence interval lower',
+                            'CI_high': 'Confidence interval upper',
+                            'block_steps': 'Bootstrap block length'
+                        })
+                        st.caption('MAE difference = first method minus second method. Negative favors the first; positive favors the second. A confidence interval excluding zero supports a difference under the bootstrap assumptions.')
+                    st.dataframe(show.round(3), hide_index=True, use_container_width=True)
+
     else:
-        st.error('Model comparison cannot be displayed. Please verify model_comparison.csv exists in the GitHub repository and includes horizon_steps, model, and MAE columns.')
-        with st.expander('Diagnostic — file search'):
-            st.write('App folder:',str(BASE))
-            st.write('Candidate files:',[str(p) for p in (BASE/'model_comparison.csv',BASE/'metrics/model_comparison.csv',BASE/'research/model_comparison.csv')])
-    st.info('**Scientific interpretation:** High accuracy on a single-site historical traffic-volume dataset does not establish accurate congestion prediction, transferability to other cities, or effectiveness of interventions.')
+        st.error('Model comparison cannot be displayed. Verify model_comparison.csv exists and contains horizon_steps, model and mae columns.')
+        with st.expander('Diagnostic: file locations', expanded=False):
+            st.write('App folder:', str(BASE))
+            st.write('Expected paths:', [str(p) for p in (BASE/'model_comparison.csv', BASE/'metrics/model_comparison.csv', BASE/'research/model_comparison.csv')])
+
+    st.caption('**Study limitation:** Historical single-site traffic-volume forecasting does not establish measured congestion reduction, transferability to other cities, or effectiveness of traffic interventions.')
 
 else:
     st.title('ℹ️ About & Roadmap')
