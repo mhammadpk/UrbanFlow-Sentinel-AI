@@ -153,6 +153,41 @@ def horizon_label(h):
     if minutes is None: minutes=h*(5 if meta.get('data_mode')=='sensor_csv' else 60)
     return f'{int(minutes)} minutes ahead' if minutes<60 else f'{minutes/60:g} hour'+('s' if minutes!=60 else '')+' ahead'
 
+def traffic_volume_visual(predicted, observed, data, heading="Traffic volume at this historical time"):
+    """CSV-driven comparison; decorative vehicles do not represent tracked cars."""
+    import altair as alt
+    values = pd.to_numeric(data[['actual', 'predicted']].stack(), errors='coerce')
+    values = values[np.isfinite(values)]
+    if values.empty or not np.isfinite(predicted) or not np.isfinite(observed):
+        st.caption('Traffic illustration unavailable for this historical example.')
+        return
+    # One common scale for both bars, derived from the saved historical dataset.
+    scale_max = max(float(values.max()), float(predicted), float(observed), 1.0)
+    st.markdown(f"#### 🚗 {heading}")
+    st.caption('Illustrative road icons: 🚗  🚙  🚕  🚌  🚗   |   Bars show saved traffic-volume values, not individual vehicles.')
+    bar_data = pd.DataFrame({
+        'Traffic measure': ['AI-predicted volume', 'Observed volume'],
+        'Vehicles per hour': [max(float(predicted), 0.0), max(float(observed), 0.0)],
+    })
+    chart = (alt.Chart(bar_data).mark_bar(cornerRadiusEnd=5, size=26).encode(
+        x=alt.X('Vehicles per hour:Q', title='Traffic volume (vehicles/hour)',
+                scale=alt.Scale(domain=[0, scale_max], nice=False)),
+        y=alt.Y('Traffic measure:N', sort=['AI-predicted volume', 'Observed volume'],
+                title=None, axis=alt.Axis(labelLimit=220)),
+        color=alt.Color('Traffic measure:N', legend=None,
+                        scale=alt.Scale(domain=['AI-predicted volume', 'Observed volume'],
+                                        range=['#1673D1', '#0E6475'])),
+        tooltip=[alt.Tooltip('Traffic measure:N'),
+                 alt.Tooltip('Vehicles per hour:Q', format=',.0f')],
+    ).properties(height=105))
+    st.altair_chart(chart, use_container_width=True)
+    st.caption(
+        f'Both bars share the same 0–{scale_max:,.0f} vehicles/hour scale, '
+        'based on the saved historical data. Longer bars mean greater traffic volume, '
+        '**not necessarily more congestion**. Vehicle icons are decorative; '
+        'there is no vehicle tracking, camera feed, or road simulation.'
+    )
+
 st.sidebar.markdown('## 🚦 UrbanFlow Sentinel AI')
 st.sidebar.caption('Smart mobility • Research prototype')
 page=st.sidebar.radio('Explore', ['🏠 Overview','🧭 Guided Demo','📈 Forecast Explorer','🧠 AI Insights','📊 Research Evidence','ℹ️ About & Roadmap'],label_visibility='collapsed')
@@ -164,56 +199,79 @@ st.sidebar.caption('The UCI study uses one monitoring location and measures traf
 firstcity_research_branding()
 
 if page=='🏠 Overview':
-    st.markdown('''<div class="hero"><div class="eyebrow">Smart mobility • Explainable AI</div><h1>See tomorrow’s traffic patterns, sooner.</h1><p>Explore how artificial intelligence can forecast traffic demand hours ahead, explain predictions, and support future proactive planning.</p></div>''',unsafe_allow_html=True)
-    st.caption('Research demonstration using historical single-site traffic-volume data. Not a live or operational congestion-management system.')
-    a,b,c=st.columns(3)
-    with a: st.markdown('<div class="card"><h4>① Explore</h4><p>Select a historical traffic example without uploading any data.</p></div>',unsafe_allow_html=True)
-    with b: st.markdown('<div class="card"><h4>② Understand</h4><p>Compare observed and forecast traffic volumes with uncertainty bounds.</p></div>',unsafe_allow_html=True)
-    with c: st.markdown('<div class="card"><h4>③ Evaluate</h4><p>Inspect research accuracy, model comparisons and limitations.</p></div>',unsafe_allow_html=True)
-    st.info('**Start here:** Select **🧭 Guided Demo** in the sidebar. Pick a forecast horizon, choose a historical example, and compare the prediction with what was later observed.')
-    st.subheader('Research results at a glance')
-    comparison=normalized_comparison()
+    st.markdown(
+        '<div class="hero"><div class="eyebrow">Smart mobility • Explainable AI</div>'
+        '<h1>Understand future traffic demand with explainable AI.</h1>'
+        '<p>Explore historical traffic-volume forecasts up to six hours ahead, '
+        'compare predictions with observations, and understand the research evidence.</p></div>',
+        unsafe_allow_html=True,
+    )
+    st.info(
+        "**Start here:** Open **🧭 Guided Demo** in the sidebar, choose a forecast "
+        "horizon, and compare a saved AI prediction with what was later observed."
+    )
+    st.subheader("Research results at a glance")
+    comparison = normalized_comparison()
     if comparison is not None:
         demo_h = 1 if 1 in H else H[0]
-        demo_model = metric_row(demo_h, 'lgbm')
-        research_best = comparison[comparison.horizon_steps == demo_h].sort_values('mae')
+        demo_model = metric_row(demo_h, "lgbm")
+        research_best = comparison[comparison.horizon_steps == demo_h].sort_values("mae")
         research_best = research_best.iloc[0] if not research_best.empty else None
-        k1,k2,k3,k4=st.columns(4)
-        k1.metric('Demo forecasting model', 'LightGBM',
-                  help='Saved LightGBM predictions power the interactive demonstration.')
-        k2.metric(f'LightGBM test MAE · {horizon_label(demo_h)}',
-                  f'{float(demo_model.mae):,.1f} vehicles/hour' if demo_model is not None else 'N/A',
-                  help='Average absolute prediction error on the held-out historical test set; lower is better.')
-        k3.metric('Forecast horizons', f'{len(H)}',
-                  help='Available saved forecast horizons.')
-        k4.metric('Monitoring locations',
-                  '1' if meta.get('data_mode','uci')=='uci' else 'Dataset-defined',
-                  help='The UCI research data use one traffic-count monitoring location.')
-        if research_best is not None and str(research_best['model']).lower() != 'lgbm':
+        k1, k2, k3 = st.columns(3)
+        k1.metric("AI demo model", "LightGBM",
+                  help="Saved LightGBM predictions power the interactive demonstration.")
+        k2.metric(
+            "Average prediction error (MAE)",
+            f"{float(demo_model.mae):,.1f}" if demo_model is not None else "N/A",
+            help=f"Vehicles/hour for {horizon_label(demo_h)} on the held-out historical test set. Lower is better.",
+        )
+        k3.metric("Forecast horizons", str(len(H)),
+                  help=", ".join(horizon_label(h) for h in H))
+        st.caption(
+            f"Average error is measured in **vehicles/hour** ({horizon_label(demo_h)}). "
+            "Available forecast horizons: " + ", ".join(horizon_label(h) for h in H) + "."
+        )
+        if research_best is not None and str(research_best["model"]).lower() != "lgbm":
             st.caption(
-                f'**Demo versus research comparison:** LightGBM powers the saved forecasts. '
-                f'{model_name(research_best["model"])} achieved the lowest overall test error '
-                f'for {horizon_label(demo_h)} '
-                f'({float(research_best["mae"]):,.1f} vehicles/hour). '
-                'See Research Evidence for the full comparison.'
+                f"**Model distinction:** LightGBM powers the demo. "
+                f"{model_name(research_best['model'])} had the lowest overall test error "
+                f"for {horizon_label(demo_h)} "
+                f"({float(research_best['mae']):,.1f} vehicles/hour). "
+                "See Research Evidence for the full comparison."
             )
-        else:
-            st.caption('Demo forecasts use LightGBM. Research Evidence contains the full held-out model comparison.')
     else:
-        st.warning('Research metrics are not available. Confirm model_comparison.csv is beside app.py or inside research/.')
-    st.subheader('What does the prototype demonstrate?')
-    x,y=st.columns([1.5,1])
-    with x:
-        st.write('UrbanFlow Sentinel AI forecasts **traffic volume (vehicles per hour)** at a monitored location using historical traffic patterns. A higher forecast indicates greater expected traffic demand, **not necessarily congestion**.')
-        st.write('**For judges:** Open **Guided Demo** in the left navigation to experience a preloaded example in under a minute.')
-    with y:
-        st.info('**Research scope**\n\n✓ Hourly forecasting\n\n✓ Model evaluation\n\n✓ Uncertainty visualization\n\n✗ Live traffic feeds\n\n✗ Verified citywide hotspots')
-    st.subheader('Preview: actual versus forecast')
-    h=H[0]; df=read_predictions(h)
+        st.warning("Research metrics are unavailable. Check model_comparison.csv in the app folder or research/.")
+
+    st.subheader("How closely do AI predictions match actual traffic?")
+    st.write(
+        "The lines compare **AI-predicted traffic volume** with traffic subsequently "
+        "observed in the historical test data. **Closer lines mean smaller prediction errors.**"
+    )
+    h = H[0]
+    df = read_predictions(h)
     if not df.empty:
-        view=df.tail(min(72,len(df)))
-        st.line_chart(view.set_index('timestamp')[['actual','predicted']],height=270)
-        st.caption(f'Last {len(view)} saved held-out observations · {horizon_label(h)}. This is historical evaluation, not a live prediction.')
+        view = df.tail(min(72, len(df))).copy()
+        preview = view.set_index("timestamp")[["actual", "predicted"]].rename(
+            columns={"actual": "Observed traffic", "predicted": "AI-predicted traffic"}
+        )
+        # Use a real saved historical record for the introductory traffic illustration.
+        latest = view.iloc[-1]
+        traffic_volume_visual(
+            float(latest['predicted']), float(latest['actual']), df,
+            heading='Traffic demand in the latest displayed historical example',
+        )
+        st.line_chart(preview, height=300)
+        st.caption(
+            f"Last {len(view)} saved held-out observations · {horizon_label(h)}. "
+            "Traffic volume is measured in vehicles/hour."
+        )
+    else:
+        st.warning("No historical predictions are available for the preview.")
+    st.caption(
+        "**Research scope:** Historical, single-site traffic-volume forecasting. "
+        "Higher traffic volume does not necessarily mean congestion. "
+        "This is not a live traffic system or an operational digital twin."
+    )
 
 elif page=='🧭 Guided Demo':
     st.title('🧭 Guided Demo')
@@ -236,6 +294,11 @@ elif page=='🧭 Guided Demo':
     a.metric('AI forecast',f"{r['predicted']:,.0f}",help='Estimated traffic volume in vehicles per hour')
     b.metric('Observed later',f"{r['actual']:,.0f}",help='Actual traffic volume from the held-out historical dataset')
     c.metric('Absolute difference',f"{abs(r['predicted']-r['actual']):,.0f}",help='Absolute forecast error for this example')
+    st.caption('All three values above are measured in vehicles/hour.')
+    traffic_volume_visual(
+        float(r['predicted']), float(r['actual']), df,
+        heading='Visual comparison for your selected historical example',
+    )
     if pd.notna(r['lower']) and pd.notna(r['upper']):
         st.info(f"**Prediction interval:** {r['lower']:,.0f}–{r['upper']:,.0f} vehicles/hour. This is an empirical uncertainty range, not a guarantee.")
     row_idx=len(df)-n+int(i)
@@ -698,7 +761,7 @@ else:
     st.subheader('What is available now')
     st.success('Historical forecasts, evaluation charts, guided demonstration, and downloadable historical records.')
     st.subheader('Future development — not yet validated')
-    st.markdown('Multi-sensor traffic speed and occupancy data; geolocated hotspot forecasting; shorter forecasting horizons; operational data integration; evaluated intervention scenarios; Saudi-city pilot validation.')
+    st.markdown('Multi-sensor traffic speed and occupancy data; geolocated hotspot forecasting; shorter forecasting horizons; operational data integration; evaluated intervention scenarios; **a future synchronized urban mobility digital twin**; Saudi-city pilot validation.')
     st.subheader('Data and responsible-use notes')
     st.write(f"**Dataset:** {meta.get('source','Historical research traffic-volume dataset')}")
     st.write(f"**Outcome:** {meta.get('outcome_interpretation','Traffic volume, not measured congestion')}")
