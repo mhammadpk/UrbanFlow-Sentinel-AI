@@ -28,6 +28,7 @@ st.markdown('''<style>
 .fc-brand .org{font-size:.82rem;color:#607787;margin-top:3px}
 .fc-brand a{text-decoration:none}
 @media(max-width:700px){.fc-brand{align-items:flex-start}.fc-brand img{width:120px}.fc-brand .name{font-size:.92rem}}
+.traffic-value{font-size:1.6rem;font-weight:750;line-height:1.5;color:#17415c;white-space:normal}.traffic-value span{font-size:.83rem;font-weight:500;color:#526b7b}
 footer{visibility:hidden}
 </style>''', unsafe_allow_html=True)
 
@@ -154,39 +155,39 @@ def horizon_label(h):
     return f'{int(minutes)} minutes ahead' if minutes<60 else f'{minutes/60:g} hour'+('s' if minutes!=60 else '')+' ahead'
 
 def traffic_volume_visual(predicted, observed, data, heading="Traffic volume at this historical time"):
-    """CSV-driven comparison; decorative vehicles do not represent tracked cars."""
-    import altair as alt
-    values = pd.to_numeric(data[['actual', 'predicted']].stack(), errors='coerce')
-    values = values[np.isfinite(values)]
-    if values.empty or not np.isfinite(predicted) or not np.isfinite(observed):
-        st.caption('Traffic illustration unavailable for this historical example.')
+    """Compact, readable CSV-driven comparison; no individual-vehicle simulation."""
+    predicted, observed = float(predicted), float(observed)
+    if not np.isfinite(predicted) or not np.isfinite(observed):
+        st.caption("Traffic comparison unavailable for this historical example.")
         return
-    # One common scale for both bars, derived from the saved historical dataset.
-    scale_max = max(float(values.max()), float(predicted), float(observed), 1.0)
+
+    predicted, observed = max(0.0, predicted), max(0.0, observed)
+    pair_max = max(predicted, observed, 1.0)
+    difference = predicted - observed
     st.markdown(f"#### 🚗 {heading}")
-    st.caption('Illustrative road icons: 🚗  🚙  🚕  🚌  🚗   |   Bars show saved traffic-volume values, not individual vehicles.')
-    bar_data = pd.DataFrame({
-        'Traffic measure': ['AI-predicted volume', 'Observed volume'],
-        'Vehicles per hour': [max(float(predicted), 0.0), max(float(observed), 0.0)],
-    })
-    chart = (alt.Chart(bar_data).mark_bar(cornerRadiusEnd=5, size=26).encode(
-        x=alt.X('Vehicles per hour:Q', title='Traffic volume (vehicles/hour)',
-                scale=alt.Scale(domain=[0, scale_max], nice=False)),
-        y=alt.Y('Traffic measure:N', sort=['AI-predicted volume', 'Observed volume'],
-                title=None, axis=alt.Axis(labelLimit=220)),
-        color=alt.Color('Traffic measure:N', legend=None,
-                        scale=alt.Scale(domain=['AI-predicted volume', 'Observed volume'],
-                                        range=['#1673D1', '#0E6475'])),
-        tooltip=[alt.Tooltip('Traffic measure:N'),
-                 alt.Tooltip('Vehicles per hour:Q', format=',.0f')],
-    ).properties(height=105))
-    st.altair_chart(chart, use_container_width=True)
-    st.caption(
-        f'Both bars share the same 0–{scale_max:,.0f} vehicles/hour scale, '
-        'based on the saved historical data. Longer bars mean greater traffic volume, '
-        '**not necessarily more congestion**. Vehicle icons are decorative; '
-        'there is no vehicle tracking, camera feed, or road simulation.'
-    )
+    st.caption("Saved historical traffic volume (vehicles/hour) — not individual tracked vehicles.")
+
+    left, right = st.columns(2, gap="large")
+    with left:
+        st.markdown("**🔵 AI forecast**")
+        st.markdown(f"<div class='traffic-value'>{predicted:,.0f} <span>vehicles/hour</span></div>",
+                    unsafe_allow_html=True)
+        st.progress(min(predicted / pair_max, 1.0))
+    with right:
+        st.markdown("**🟢 Observed traffic**")
+        st.markdown(f"<div class='traffic-value'>{observed:,.0f} <span>vehicles/hour</span></div>",
+                    unsafe_allow_html=True)
+        st.progress(min(observed / pair_max, 1.0))
+
+    if difference > 0:
+        explanation = f"The forecast was **{abs(difference):,.0f} vehicles/hour higher** than observed."
+    elif difference < 0:
+        explanation = f"The forecast was **{abs(difference):,.0f} vehicles/hour lower** than observed."
+    else:
+        explanation = "The forecast and observation matched in this example."
+    st.caption("Both indicators use the same scale, relative to the larger of these two values. "
+               "They compare traffic volume, not congestion or individual vehicles.")
+    st.markdown(explanation)
 
 st.sidebar.markdown('## 🚦 UrbanFlow Sentinel AI')
 st.sidebar.caption('Smart mobility • Research prototype')
@@ -311,7 +312,7 @@ elif page=='🧭 Guided Demo':
         interpretation=f'The model forecast about {abs(difference):,.0f} fewer vehicles/hour than were subsequently observed.'
     else:
         interpretation='The predicted and observed traffic volumes match for this example.'
-    st.success(f'**Plain-language explanation:** {interpretation} Traffic volume is not the same as traffic congestion.')
+    st.info('**Remember:** Higher traffic volume does not necessarily mean traffic congestion. These are historical test predictions, not live measurements.')
     with st.expander('What do the numbers mean?'):
         st.markdown('**AI forecast:** Estimated vehicles passing the sensor in the target hour.\n\n**Observed later:** Recorded vehicle count for that hour.\n\n**Absolute difference:** The gap between the prediction and the observed count.\n\n**Prediction interval:** A range derived from historical model errors; it is not guaranteed to contain every future observation.')
     st.caption('All examples come from previously saved held-out research results. Selecting an example does not retrain the model.')
